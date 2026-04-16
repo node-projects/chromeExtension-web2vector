@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#42A5F5"/>
+      <stop offset="100%" stop-color="#1565C0"/>
+    </linearGradient>
+  </defs>
+  <!-- Rounded-square background -->
+  <rect width="128" height="128" rx="28" fill="url(#bg)"/>
+  <!-- Bézier curve representing vector output -->
+  <path d="M26 86 C26 42, 64 42, 64 64 C64 86, 102 86, 102 42"
+        fill="none" stroke="#fff" stroke-width="7" stroke-linecap="round"/>
+  <!-- End-point control nodes -->
+  <circle cx="26"  cy="86" r="7" fill="#fff"/>
+  <circle cx="102" cy="42" r="7" fill="#fff"/>
+  <!-- Small export / download arrow (bottom-right) -->
+  <line x1="100" y1="90" x2="100" y2="112"
+        stroke="#fff" stroke-width="5" stroke-linecap="round" opacity="0.75"/>
+  <polyline points="88,102 100,114 112,102"
+            fill="none" stroke="#fff" stroke-width="5"
+            stroke-linecap="round" stroke-linejoin="round" opacity="0.75"/>
+</svg>

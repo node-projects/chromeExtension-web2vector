@@ -1,0 +1,27 @@
+{
+  "name": "web2vector-extension",
+  "version": "1.0.0",
+  "description": "Chrome extension to export web pages to SVG, DXF, DWG, EMF, PDF, HTML, PNG, JPEG, and WebP using layout2vector",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node esbuild.config.mjs",
+    "build:icons": "node scripts/build-icons.mjs",
+    "build:all": "npm run build:icons && npm run build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "package": "npm run build:all && node scripts/package-extension.mjs",
+    "upload": "node scripts/upload-to-store.mjs"
+  },
+  "dependencies": {
+    "@node-projects/layout2vector": "^5.2.0",
+    "get-box-quads-polyfill": "^4.29.0"
+  },
+  "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2",
+    "archiver": "^7.0.1",
+    "chrome-webstore-upload": "^3.0.4",
+    "esbuild": "^0.25.0",
+    "vitest": "^3.1.0"
+  }
+}

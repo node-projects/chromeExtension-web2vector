@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Generate icons
+        run: npm run build:icons
+
+      - name: Build extension
+        run: npm run build
+
+      - name: Run tests
+        run: npm test
+
+      - name: Package extension ZIP
+        run: node scripts/package-extension.mjs
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: web2vector-extension
+          path: "*.zip"
