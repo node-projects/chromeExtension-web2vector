@@ -21,19 +21,33 @@
     const height = root.scrollHeight;
     const maxY = height;
 
+    const BITMAP_FORMATS = ['png', 'jpeg', 'webp'];
+    const isBitmap = BITMAP_FORMATS.includes(format);
+
     // ── Extract IR ────────────────────────────────────────
-    const ir = await extractIR(root, {
-      boxType: 'border',
-      includeText: true,
-      includeImages: true,
-      walkIframes: true,
-      convertFormControls: true,
-    });
+    async function extract(includeImages) {
+      return extractIR(root, {
+        boxType: 'border',
+        includeText: true,
+        includeImages,
+        walkIframes: true,
+        convertFormControls: true,
+      });
+    }
+
+    let ir = await extract(true);
 
     // ── Render to chosen format ───────────────────────────
     let data;   // string | Uint8Array
     let mime;
     let ext;
+
+    async function renderBitmap(irNodes, mimeType, quality) {
+      const w = new writers.ImageWriter({ width, height, scale: 2 });
+      const res = await renderIR(irNodes, w);
+      await res.finalize();
+      return res.toBytes(mimeType, quality);
+    }
 
     switch (format) {
       /* ── Vector ── */
@@ -97,32 +111,44 @@
         break;
       }
 
-      /* ── Image ── */
+      /* ── Image (bitmap) ── */
       case 'png': {
-        const w = new writers.ImageWriter({ width, height, scale: 2 });
-        const res = await renderIR(ir, w);
-        await res.finalize();
-        data = res.toBytes('image/png');
         mime = 'image/png';
         ext = '.png';
+        try {
+          data = await renderBitmap(ir, mime);
+        } catch (e) {
+          if (isTaintedCanvasError(e)) {
+            ir = await extract(false);
+            data = await renderBitmap(ir, mime);
+          } else throw e;
+        }
         break;
       }
       case 'jpeg': {
-        const w = new writers.ImageWriter({ width, height, scale: 2 });
-        const res = await renderIR(ir, w);
-        await res.finalize();
-        data = res.toBytes('image/jpeg', 0.92);
         mime = 'image/jpeg';
         ext = '.jpg';
+        try {
+          data = await renderBitmap(ir, mime, 0.92);
+        } catch (e) {
+          if (isTaintedCanvasError(e)) {
+            ir = await extract(false);
+            data = await renderBitmap(ir, mime, 0.92);
+          } else throw e;
+        }
         break;
       }
       case 'webp': {
-        const w = new writers.ImageWriter({ width, height, scale: 2 });
-        const res = await renderIR(ir, w);
-        await res.finalize();
-        data = res.toBytes('image/webp', 0.90);
         mime = 'image/webp';
         ext = '.webp';
+        try {
+          data = await renderBitmap(ir, mime, 0.90);
+        } catch (e) {
+          if (isTaintedCanvasError(e)) {
+            ir = await extract(false);
+            data = await renderBitmap(ir, mime, 0.90);
+          } else throw e;
+        }
         break;
       }
 
@@ -164,4 +190,9 @@ function blobToDataUrl(blob) {
     reader.onerror = () => reject(reader.error);
     reader.readAsDataURL(blob);
   });
+}
+
+function isTaintedCanvasError(err) {
+  return err instanceof DOMException &&
+    (err.name === 'SecurityError' || err.message.includes('Tainted'));
 }
