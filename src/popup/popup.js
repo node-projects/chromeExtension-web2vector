@@ -1,4 +1,5 @@
 import { FORMATS, CATEGORIES } from '../shared/formats.js';
+import { extensionApi } from '../shared/extension-api.js';
 
 const list = document.getElementById('format-list');
 const status = document.getElementById('status');
@@ -50,11 +51,11 @@ function startExport(format) {
   setButtons(false);
   showStatus('Exporting\u2026', 'loading');
 
-  chrome.runtime.sendMessage({ action: 'export', format });
+  extensionApi.runtime.sendMessage({ action: 'export', format });
 }
 
 // ── Listen for result from background ─────────────────────
-chrome.runtime.onMessage.addListener((msg) => {
+extensionApi.runtime.onMessage.addListener((msg) => {
   if (msg.action === 'export-complete') {
     showStatus('Download started!', 'success');
     exporting = false;

@@ -6,6 +6,8 @@
  * data-URL, and sends it to the background service worker which
  * triggers chrome.downloads.download({ saveAs: true }).
  */
+import { extensionApi } from '../shared/extension-api.js';
+
 (async () => {
   try {
     const format = globalThis.__web2vector_format;
@@ -170,13 +172,13 @@
     const filename = `${title}${ext}`;
 
     // ── Send to background → chrome.downloads ─────────────
-    chrome.runtime.sendMessage({
+    extensionApi.runtime.sendMessage({
       type: 'export-result',
       dataUrl,
       filename,
     });
   } catch (err) {
-    chrome.runtime.sendMessage({
+    extensionApi.runtime.sendMessage({
       type: 'export-error',
       error: String(err?.message ?? err),
     });

@@ -21,6 +21,7 @@ function createChromeStub() {
     },
     downloads: {
       download: vi.fn().mockResolvedValue(1001),
+      onChanged: { addListener: (fn) => { listeners.onDownloadChanged = fn; } },
     },
     _listeners: listeners,
   };
@@ -32,6 +33,7 @@ describe('service-worker message handling', () => {
   beforeEach(() => {
     vi.resetModules();
     chrome = createChromeStub();
+    delete globalThis.browser;
     globalThis.chrome = chrome;
   });
 
@@ -106,10 +108,56 @@ describe('service-worker message handling', () => {
     await vi.waitFor(() => {
       expect(chrome.downloads.download).toHaveBeenCalledWith(
         expect.objectContaining({
+          url: 'data:text/plain;base64,dGVzdA==',
           saveAs: true,
           filename: 'test.svg',
         }),
       );
     }, { timeout: 2000 });
+  });
+
+  it('uses blob URLs for Firefox data-url downloads', async () => {
+    const browser = createChromeStub();
+    const originalCreateObjectURL = URL.createObjectURL;
+    const originalRevokeObjectURL = URL.revokeObjectURL;
+
+    delete globalThis.chrome;
+    globalThis.browser = browser;
+    URL.createObjectURL = vi.fn(() => 'blob:firefox-download');
+    URL.revokeObjectURL = vi.fn();
+
+    try {
+      await import('../src/background/service-worker.js');
+      browser._listeners.onMessage?.(
+        {
+          type: 'export-result',
+          dataUrl: 'data:text/plain;base64,dGVzdA==',
+          filename: 'test.txt',
+        },
+        { tab: { id: 42 } },
+      );
+
+      await vi.waitFor(() => {
+        expect(browser.downloads.download).toHaveBeenCalledWith(
+          expect.objectContaining({
+            url: 'blob:firefox-download',
+            saveAs: true,
+            filename: 'test.txt',
+          }),
+        );
+      }, { timeout: 2000 });
+
+      browser._listeners.onDownloadChanged?.({
+        id: 1001,
+        state: { current: 'complete' },
+      });
+
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:firefox-download');
+    } finally {
+      URL.createObjectURL = originalCreateObjectURL;
+      URL.revokeObjectURL = originalRevokeObjectURL;
+      delete globalThis.browser;
+      globalThis.chrome = chrome;
+    }
   });
 });

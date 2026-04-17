@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
+import { createFirefoxManifest } from '../scripts/manifest-utils.mjs';
 
 describe('manifest.json', () => {
   const manifest = JSON.parse(fs.readFileSync('manifest.json', 'utf8'));
@@ -26,5 +27,16 @@ describe('manifest.json', () => {
     for (const size of ['16', '32', '48', '128']) {
       expect(manifest.icons[size]).toMatch(/icon\d+\.png$/);
     }
+  });
+
+  it('can derive a Firefox-compatible background manifest', () => {
+    const firefoxManifest = createFirefoxManifest(manifest);
+
+    expect(firefoxManifest.manifest_version).toBe(3);
+    expect(firefoxManifest.background).toEqual({
+      scripts: ['service-worker.js'],
+    });
+    expect(firefoxManifest.permissions).toEqual(manifest.permissions);
+    expect(firefoxManifest.action).toEqual(manifest.action);
   });
 });

@@ -1,6 +1,6 @@
-# Web2Vector — Chrome Extension
+# Web2Vector — Chrome and Firefox Extension
 
-A Chrome extension that exports any web page's rendered DOM to **10 output formats** using the [@node-projects/layout2vector](https://github.com/node-projects/layout2vector) library.
+A browser extension that exports any web page's rendered DOM to **10 output formats** using the [@node-projects/layout2vector](https://github.com/node-projects/layout2vector) library.
 
 <p align="center">
   <img src="src/icons/icon.svg" width="128" alt="Web2Vector icon" />
@@ -23,7 +23,7 @@ A Chrome extension that exports any web page's rendered DOM to **10 output forma
 
 ## Usage
 
-1. Click the **Web2Vector** icon in the Chrome toolbar.
+1. Click the **Web2Vector** icon in the browser toolbar.
 2. Pick an export format from the popup menu.
 3. A **Save As** dialog appears — choose where to save the file.
 
@@ -71,6 +71,12 @@ npm run build:all
 2. Enable **Developer mode** (top right)
 3. Click **Load unpacked** → select the `dist/` folder
 
+### Load in Firefox
+
+1. Navigate to `about:debugging#/runtime/this-firefox`
+2. Click **Load Temporary Add-on**
+3. Select the `manifest.json` file inside `dist-firefox/`
+
 ### Test
 
 ```bash
@@ -80,7 +86,9 @@ npm test
 ### Package for Distribution
 
 ```bash
-npm run package     # creates web2vector-<version>.zip
+npm run package              # creates web2vector-chrome-<version>.zip
+npm run package:firefox      # creates web2vector-firefox-<version>.zip
+npm run package:all-browsers # creates both ZIPs
 ```
 
 ## Publishing to Chrome Web Store
@@ -106,7 +114,7 @@ Then create a GitHub Release to trigger the publish workflow, or use the manual 
 ## Project Structure
 
 ```
-├── manifest.json               Chrome extension manifest (v3)
+├── manifest.json               Chrome source manifest (v3)
 ├── esbuild.config.mjs          Build configuration
 ├── src/
 │   ├── shared/formats.js       Format definitions (shared by popup + background)
@@ -125,6 +133,7 @@ Then create a GitHub Release to trigger the publish workflow, or use the manual 
 │       └── icon.svg            Source icon
 ├── scripts/
 │   ├── build-icons.mjs         SVG → PNG conversion
+│   ├── manifest-utils.mjs      Browser-specific manifest helpers
 │   ├── package-extension.mjs   ZIP packaging
 │   └── upload-to-store.mjs     Chrome Web Store upload
 ├── tests/
