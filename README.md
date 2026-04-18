@@ -15,6 +15,7 @@ A browser extension that exports any web page's rendered DOM to **10 output form
 | | DXF (AutoCAD) | `.dxf` | `AcadDXFWriter` (via `@node-projects/acad-ts`) |
 | | DWG | `.dwg` | `DWGWriter` (via `@node-projects/acad-ts`) |
 | | EMF | `.emf` | `EMFWriter` |
+| | EMF+ | `.emf` | `EMFPlusWriter` |
 | **Document** | PDF | `.pdf` | `PDFWriter` |
 | | HTML | `.html` | `HTMLWriter` |
 | **Image** | PNG | `.png` | `ImageWriter` |

@@ -17,7 +17,7 @@
   },
   "dependencies": {
     "@node-projects/layout2vector": "^5.4.0",
-    "get-box-quads-polyfill": "^4.29.0"
+    "get-box-quads-polyfill": "^4.30.0"
   },
   "devDependencies": {
     "@resvg/resvg-js": "^2.6.2",
