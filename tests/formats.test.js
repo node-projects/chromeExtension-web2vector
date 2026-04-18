@@ -6,11 +6,11 @@ describe('FORMATS', () => {
     const ids = Object.keys(FORMATS);
     expect(ids).toEqual(
       expect.arrayContaining([
-        'svg', 'dxf-standard', 'dxf-acad', 'dwg', 'emf',
+        'svg', 'dxf-standard', 'dxf-acad', 'dwg', 'emf', 'emfplus',
         'pdf', 'html', 'png', 'jpeg', 'webp',
       ]),
     );
-    expect(ids).toHaveLength(10);
+    expect(ids).toHaveLength(11);
   });
 
   it('every format has required properties', () => {

@@ -42,6 +42,13 @@ export const FORMATS = {
     bundle: 'core',
     category: 'vector',
   },
+  'emfplus': {
+    name: 'EMF+',
+    ext: '.emf',
+    mime: 'application/octet-stream',
+    bundle: 'core',
+    category: 'vector',
+  },
   pdf: {
     name: 'PDF',
     ext: '.pdf',

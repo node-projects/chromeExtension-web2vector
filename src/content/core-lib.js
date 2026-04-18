@@ -13,15 +13,16 @@ import {
   HTMLWriter,
   PDFWriter,
   EMFWriter,
+  EMFPlusWriter,
   ImageWriter,
 } from '@node-projects/layout2vector';
 
 if (!globalThis.__web2vector) {
-  try { addPolyfill(window); } catch (_) { /* already applied or native */ }
+  try { addPolyfill(window, true); } catch (_) { /* already applied or native */ }
 
   globalThis.__web2vector = {
     extractIR,
     renderIR,
-    writers: { SVGWriter, HTMLWriter, PDFWriter, EMFWriter, ImageWriter },
+    writers: { SVGWriter, HTMLWriter, PDFWriter, EMFWriter, EMFPlusWriter, ImageWriter },
   };
 }

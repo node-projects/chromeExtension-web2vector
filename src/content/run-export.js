@@ -94,6 +94,13 @@ import { extensionApi } from '../shared/extension-api.js';
         ext = '.emf';
         break;
       }
+      case 'emfplus': {
+        const w = new writers.EMFPlusWriter({ width, height });
+        data = await renderIR(ir, w);
+        mime = 'application/octet-stream';
+        ext = '.emf';
+        break;
+      }
 
       /* ── Document ── */
       case 'pdf': {
