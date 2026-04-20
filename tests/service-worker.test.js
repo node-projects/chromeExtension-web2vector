@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { FORMATS } from '../src/shared/formats.js';
 
 // ── Minimal chrome API stubs ──────────────────────────────
 function createChromeStub() {
@@ -40,8 +41,7 @@ describe('service-worker message handling', () => {
   it('creates context-menu entries on install', async () => {
     await import('../src/background/service-worker.js');
     chrome._listeners.onInstalled?.();
-    // 1 parent + 10 format sub-items
-    expect(chrome.contextMenus.create).toHaveBeenCalledTimes(11);
+    expect(chrome.contextMenus.create).toHaveBeenCalledTimes(Object.keys(FORMATS).length + 1);
   });
 
   it('injects correct scripts for a core format (svg)', async () => {

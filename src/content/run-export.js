@@ -9,6 +9,8 @@
 import { calculateExportSize } from './export-size.js';
 import { extensionApi } from '../shared/extension-api.js';
 
+const PX_TO_MM = 25.4 / 96;
+
 (async () => {
   try {
     const format = globalThis.__web2vector_format;
@@ -104,7 +106,10 @@ import { extensionApi } from '../shared/extension-api.js';
 
       /* ── Document ── */
       case 'pdf': {
-        const w = new writers.PDFWriter();
+        const w = new writers.PDFWriter({
+          pageWidth: width * PX_TO_MM,
+          pageHeight: height * PX_TO_MM,
+        });
         const doc = await renderIR(ir, w);
         await doc.finalize();
         data = doc.toBytes();
