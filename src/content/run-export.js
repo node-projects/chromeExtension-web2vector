@@ -6,6 +6,7 @@
  * data-URL, and sends it to the background service worker which
  * triggers chrome.downloads.download({ saveAs: true }).
  */
+import { calculateExportSize } from './export-size.js';
 import { extensionApi } from '../shared/extension-api.js';
 
 (async () => {
@@ -19,9 +20,6 @@ import { extensionApi } from '../shared/extension-api.js';
     const { extractIR, renderIR, writers } = lib;
 
     const root = document.documentElement;
-    const width = root.scrollWidth;
-    const height = root.scrollHeight;
-    const maxY = height;
 
     const BITMAP_FORMATS = ['png', 'jpeg', 'webp'];
     const isBitmap = BITMAP_FORMATS.includes(format);
@@ -38,6 +36,8 @@ import { extensionApi } from '../shared/extension-api.js';
     }
 
     let ir = await extract(true);
+    const { width, height } = calculateExportSize(root, ir);
+    const maxY = height;
 
     // ── Render to chosen format ───────────────────────────
     let data;   // string | Uint8Array
