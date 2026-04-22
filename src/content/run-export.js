@@ -8,6 +8,8 @@
  */
 import { calculateExportSize } from './export-size.js';
 import { extensionApi } from '../shared/extension-api.js';
+import { EXPORT_STREAM_CHUNK_BYTES, createExportTransferId } from '../shared/export-transfer.js';
+import { createExportBlob, stripPotentiallyTaintedImages } from './export-utils.js';
 
 const PX_TO_MM = 25.4 / 96;
 
@@ -51,6 +53,27 @@ const PX_TO_MM = 25.4 / 96;
       const res = await renderIR(irNodes, w);
       await res.finalize();
       return res.toBytes(mimeType, quality);
+    }
+
+    async function renderBitmapWithFallback(mimeType, quality) {
+      try {
+        return await renderBitmap(ir, mimeType, quality);
+      } catch (error) {
+        if (!isTaintedCanvasError(error)) throw error;
+
+        const filteredIr = stripPotentiallyTaintedImages(ir);
+        if (filteredIr.length !== ir.length) {
+          try {
+            ir = filteredIr;
+            return await renderBitmap(ir, mimeType, quality);
+          } catch (retryError) {
+            if (!isTaintedCanvasError(retryError)) throw retryError;
+          }
+        }
+
+        ir = await extract(false);
+        return renderBitmap(ir, mimeType, quality);
+      }
     }
 
     switch (format) {
@@ -129,40 +152,19 @@ const PX_TO_MM = 25.4 / 96;
       case 'png': {
         mime = 'image/png';
         ext = '.png';
-        try {
-          data = await renderBitmap(ir, mime);
-        } catch (e) {
-          if (isTaintedCanvasError(e)) {
-            ir = await extract(false);
-            data = await renderBitmap(ir, mime);
-          } else throw e;
-        }
+        data = await renderBitmapWithFallback(mime);
         break;
       }
       case 'jpeg': {
         mime = 'image/jpeg';
         ext = '.jpg';
-        try {
-          data = await renderBitmap(ir, mime, 0.92);
-        } catch (e) {
-          if (isTaintedCanvasError(e)) {
-            ir = await extract(false);
-            data = await renderBitmap(ir, mime, 0.92);
-          } else throw e;
-        }
+        data = await renderBitmapWithFallback(mime, 0.92);
         break;
       }
       case 'webp': {
         mime = 'image/webp';
         ext = '.webp';
-        try {
-          data = await renderBitmap(ir, mime, 0.90);
-        } catch (e) {
-          if (isTaintedCanvasError(e)) {
-            ir = await extract(false);
-            data = await renderBitmap(ir, mime, 0.90);
-          } else throw e;
-        }
+        data = await renderBitmapWithFallback(mime, 0.90);
         break;
       }
 
@@ -171,11 +173,7 @@ const PX_TO_MM = 25.4 / 96;
     }
 
     // ── Convert to data-URL ───────────────────────────────
-    const blob = new Blob(
-      [data instanceof Uint8Array ? data : new TextEncoder().encode(data)],
-      { type: mime },
-    );
-    const dataUrl = await blobToDataUrl(blob);
+    const blob = createExportBlob(data, mime);
 
     // ── Build filename ────────────────────────────────────
     const title = (document.title || 'export')
@@ -184,24 +182,73 @@ const PX_TO_MM = 25.4 / 96;
     const filename = `${title}${ext}`;
 
     // ── Send to background → chrome.downloads ─────────────
-    extensionApi.runtime.sendMessage({
-      type: 'export-result',
-      dataUrl,
-      filename,
-    });
+    await sendExportResult(blob, filename);
   } catch (err) {
-    extensionApi.runtime.sendMessage({
-      type: 'export-error',
-      error: String(err?.message ?? err),
-    });
+    await reportExportError(err);
   }
 })();
 
-function blobToDataUrl(blob) {
+async function sendExportResult(blob, filename) {
+  const transferId = createExportTransferId();
+
+  await sendTransferMessage({
+    type: 'export-transfer-start',
+    transferId,
+    filename,
+    mime: blob.type || 'application/octet-stream',
+    size: blob.size,
+  });
+
+  for (let offset = 0; offset < blob.size; offset += EXPORT_STREAM_CHUNK_BYTES) {
+    const chunkBase64 = await blobChunkToBase64(blob.slice(offset, offset + EXPORT_STREAM_CHUNK_BYTES));
+    await sendTransferMessage({
+      type: 'export-transfer-chunk',
+      transferId,
+      chunkBase64,
+    });
+  }
+
+  await sendTransferMessage({
+    type: 'export-transfer-complete',
+    transferId,
+  });
+}
+
+async function sendTransferMessage(message) {
+  const response = await extensionApi.runtime.sendMessage(message);
+
+  if (!response || response.ok !== true) {
+    throw new Error(response?.error || 'Export transfer did not receive an acknowledgement');
+  }
+
+  return response;
+}
+
+async function reportExportError(err) {
+  try {
+    await extensionApi.runtime.sendMessage({
+      type: 'export-error',
+      error: String(err?.message ?? err),
+    });
+  } catch {
+    // Ignore missing receivers while bubbling the original error to the console.
+  }
+}
+
+function blobChunkToBase64(blob) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = () => reject(reader.error);
+    reader.onload = () => {
+      const result = reader.result;
+      if (typeof result !== 'string') {
+        reject(new Error('Failed to serialize export chunk'));
+        return;
+      }
+
+      const commaIndex = result.indexOf(',');
+      resolve(commaIndex >= 0 ? result.slice(commaIndex + 1) : result);
+    };
+    reader.onerror = () => reject(reader.error || new Error('Failed to read export chunk'));
     reader.readAsDataURL(blob);
   });
 }

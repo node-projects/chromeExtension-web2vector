@@ -28,6 +28,17 @@ function createChromeStub() {
   };
 }
 
+function createDeferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+
+  return { promise, resolve, reject };
+}
+
 describe('service-worker message handling', () => {
   let chrome;
 
@@ -159,5 +170,186 @@ describe('service-worker message handling', () => {
       delete globalThis.browser;
       globalThis.chrome = chrome;
     }
+  });
+
+  it('assembles streamed export chunks into a blob download', async () => {
+    await import('../src/background/service-worker.js');
+    const sendResponse = vi.fn();
+    chrome._listeners.onMessage?.({
+      type: 'export-transfer-start',
+      transferId: 'transfer-1',
+      filename: 'streamed.pdf',
+      mime: 'application/pdf',
+      size: 4,
+    }, { tab: { id: 42 }, frameId: 0, documentId: 'doc-1' }, sendResponse);
+    chrome._listeners.onMessage?.({
+      type: 'export-transfer-chunk',
+      transferId: 'transfer-1',
+      chunkBase64: 'AQI=',
+    }, { tab: { id: 42 }, frameId: 0, documentId: 'doc-1' }, sendResponse);
+    chrome._listeners.onMessage?.({
+      type: 'export-transfer-chunk',
+      transferId: 'transfer-1',
+      chunkBase64: 'AwQ=',
+    }, { tab: { id: 42 }, frameId: 0, documentId: 'doc-1' }, sendResponse);
+
+    const keepChannelOpen = chrome._listeners.onMessage?.(
+      { type: 'export-transfer-complete', transferId: 'transfer-1' },
+      { tab: { id: 42 }, frameId: 0, documentId: 'doc-1' },
+      sendResponse,
+    );
+
+    expect(keepChannelOpen).toBe(true);
+
+    await vi.waitFor(() => {
+      expect(chrome.downloads.download).toHaveBeenCalledWith(
+        expect.objectContaining({
+          url: 'data:application/pdf;base64,AQIDBA==',
+          filename: 'streamed.pdf',
+          saveAs: true,
+        }),
+      );
+    }, { timeout: 2000 });
+
+    await vi.waitFor(() => {
+      expect(sendResponse).toHaveBeenCalledWith({ ok: true });
+    }, { timeout: 2000 });
+  });
+
+  it('completes the transfer before the download promise resolves', async () => {
+    const downloadDeferred = createDeferred();
+
+    chrome.downloads.download.mockReturnValueOnce(downloadDeferred.promise);
+
+    await import('../src/background/service-worker.js');
+    const sendResponse = vi.fn();
+    chrome._listeners.onMessage?.({
+      type: 'export-transfer-start',
+      transferId: 'transfer-2',
+      filename: 'pending.pdf',
+      mime: 'application/pdf',
+      size: 2,
+    }, { tab: { id: 42 }, frameId: 0, documentId: 'doc-2' }, sendResponse);
+    chrome._listeners.onMessage?.({
+      type: 'export-transfer-chunk',
+      transferId: 'transfer-2',
+      chunkBase64: 'AQI=',
+    }, { tab: { id: 42 }, frameId: 0, documentId: 'doc-2' }, sendResponse);
+
+    chrome._listeners.onMessage?.(
+      { type: 'export-transfer-complete', transferId: 'transfer-2' },
+      { tab: { id: 42 }, frameId: 0, documentId: 'doc-2' },
+      sendResponse,
+    );
+
+    await vi.waitFor(() => {
+      expect(sendResponse).toHaveBeenCalledWith({ ok: true });
+    }, { timeout: 2000 });
+
+    await vi.waitFor(() => {
+      expect(chrome.downloads.download).toHaveBeenCalledWith(
+        expect.objectContaining({
+          url: 'data:application/pdf;base64,AQI=',
+          filename: 'pending.pdf',
+          saveAs: true,
+        }),
+      );
+    }, { timeout: 2000 });
+
+    downloadDeferred.resolve(2002);
+
+    await vi.waitFor(() => {
+      expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({ action: 'export-complete' });
+    }, { timeout: 2000 });
+  });
+
+  it('uses blob URLs for Firefox streamed downloads', async () => {
+    const browser = createChromeStub();
+    const originalCreateObjectURL = URL.createObjectURL;
+    const originalRevokeObjectURL = URL.revokeObjectURL;
+
+    delete globalThis.chrome;
+    globalThis.browser = browser;
+    URL.createObjectURL = vi.fn(() => 'blob:firefox-streamed-download');
+    URL.revokeObjectURL = vi.fn();
+
+    try {
+      await import('../src/background/service-worker.js');
+      const sendResponse = vi.fn();
+      browser._listeners.onMessage?.({
+        type: 'export-transfer-start',
+        transferId: 'transfer-3',
+        filename: 'streamed.txt',
+        mime: 'text/plain',
+        size: 4,
+      }, { tab: { id: 42 }, frameId: 0, documentId: 'doc-3' }, sendResponse);
+      browser._listeners.onMessage?.({
+        type: 'export-transfer-chunk',
+        transferId: 'transfer-3',
+        chunkBase64: 'dGVzdA==',
+      }, { tab: { id: 42 }, frameId: 0, documentId: 'doc-3' }, sendResponse);
+      browser._listeners.onMessage?.(
+        { type: 'export-transfer-complete', transferId: 'transfer-3' },
+        { tab: { id: 42 }, frameId: 0, documentId: 'doc-3' },
+        sendResponse,
+      );
+
+      await vi.waitFor(() => {
+        expect(browser.downloads.download).toHaveBeenCalledWith(
+          expect.objectContaining({
+            url: 'blob:firefox-streamed-download',
+            filename: 'streamed.txt',
+            saveAs: true,
+          }),
+        );
+      }, { timeout: 2000 });
+
+      browser._listeners.onDownloadChanged?.({
+        id: 1001,
+        state: { current: 'complete' },
+      });
+
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:firefox-streamed-download');
+    } finally {
+      URL.createObjectURL = originalCreateObjectURL;
+      URL.revokeObjectURL = originalRevokeObjectURL;
+      delete globalThis.browser;
+      globalThis.chrome = chrome;
+    }
+  });
+
+  it('accepts streamed transfer messages without sender.tab', async () => {
+    await import('../src/background/service-worker.js');
+    const sendResponse = vi.fn();
+
+    chrome._listeners.onMessage?.({
+      type: 'export-transfer-start',
+      transferId: 'transfer-4',
+      filename: 'no-tab.pdf',
+      mime: 'application/pdf',
+      size: 2,
+    }, { frameId: 0, documentId: 'doc-no-tab' }, sendResponse);
+    chrome._listeners.onMessage?.({
+      type: 'export-transfer-chunk',
+      transferId: 'transfer-4',
+      chunkBase64: 'AQI=',
+    }, { frameId: 0, documentId: 'doc-no-tab' }, sendResponse);
+
+    chrome._listeners.onMessage?.(
+      { type: 'export-transfer-complete', transferId: 'transfer-4' },
+      { frameId: 0, documentId: 'doc-no-tab' },
+      sendResponse,
+    );
+
+    await vi.waitFor(() => {
+      expect(sendResponse).toHaveBeenCalledWith({ ok: true });
+      expect(chrome.downloads.download).toHaveBeenCalledWith(
+        expect.objectContaining({
+          url: 'data:application/pdf;base64,AQI=',
+          filename: 'no-tab.pdf',
+          saveAs: true,
+        }),
+      );
+    }, { timeout: 2000 });
   });
 });

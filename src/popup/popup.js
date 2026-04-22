@@ -1,8 +1,10 @@
 import { FORMATS, CATEGORIES } from '../shared/formats.js';
 import { extensionApi } from '../shared/extension-api.js';
+import { POPUP_STATUS_PORT_NAME } from '../shared/popup-status.js';
 
 const list = document.getElementById('format-list');
 const status = document.getElementById('status');
+let statusPort = null;
 
 // ── Build UI ──────────────────────────────────────────────
 const grouped = {};
@@ -55,7 +57,7 @@ function startExport(format) {
 }
 
 // ── Listen for result from background ─────────────────────
-extensionApi.runtime.onMessage.addListener((msg) => {
+function handleStatusMessage(msg) {
   if (msg.action === 'export-complete') {
     showStatus('Download started!', 'success');
     exporting = false;
@@ -66,4 +68,23 @@ extensionApi.runtime.onMessage.addListener((msg) => {
     exporting = false;
     setButtons(true);
   }
-});
+}
+
+function connectStatusPort() {
+  const port = extensionApi.runtime.connect({ name: POPUP_STATUS_PORT_NAME });
+  statusPort = port;
+  port.onMessage.addListener(handleStatusMessage);
+  port.onDisconnect.addListener(() => {
+    if (statusPort === port) {
+      statusPort = null;
+    }
+
+    globalThis.setTimeout(() => {
+      if (!statusPort) {
+        connectStatusPort();
+      }
+    }, 0);
+  });
+}
+
+connectStatusPort();
