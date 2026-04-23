@@ -9,7 +9,13 @@
 import { calculateExportSize } from './export-size.js';
 import { extensionApi } from '../shared/extension-api.js';
 import { EXPORT_STREAM_CHUNK_BYTES, createExportTransferId } from '../shared/export-transfer.js';
-import { createExportBlob, stripPotentiallyTaintedImages } from './export-utils.js';
+import {
+  collectInaccessibleIframeDiagnostics,
+  collectPotentiallyTaintedImageDiagnostics,
+  createExportBlob,
+  replaceUnsafeImageSources,
+  stripPotentiallyTaintedImages,
+} from './export-utils.js';
 
 const PX_TO_MM = 25.4 / 96;
 
@@ -34,12 +40,14 @@ const PX_TO_MM = 25.4 / 96;
         boxType: 'border',
         includeText: true,
         includeImages,
+        includeSourceMetadata: true,
         walkIframes: true,
         convertFormControls: true,
       });
     }
 
     let ir = await extract(true);
+    ir = await resolveUnsafeImageSourcesViaExtension(ir);
     const { width, height } = calculateExportSize(root, ir);
     const maxY = height;
 
@@ -62,6 +70,14 @@ const PX_TO_MM = 25.4 / 96;
         if (!isTaintedCanvasError(error)) throw error;
 
         const filteredIr = stripPotentiallyTaintedImages(ir);
+        logBitmapFallbackDiagnostics({
+          format,
+          imageNodeCount: countImageNodes(ir),
+          filteredImageNodeCount: countImageNodes(filteredIr),
+          taintedImages: collectPotentiallyTaintedImageDiagnostics(ir),
+          inaccessibleIframes: collectInaccessibleIframeDiagnostics(root),
+        });
+
         if (filteredIr.length !== ir.length) {
           try {
             ir = filteredIr;
@@ -235,6 +251,21 @@ async function reportExportError(err) {
   }
 }
 
+async function resolveUnsafeImageSourcesViaExtension(irNodes) {
+  return replaceUnsafeImageSources(irNodes, async (source) => {
+    const response = await extensionApi.runtime.sendMessage({
+      type: 'fetch-image-data-url',
+      url: source,
+    });
+
+    if (!response || response.ok !== true || typeof response.dataUrl !== 'string') {
+      return null;
+    }
+
+    return response.dataUrl;
+  });
+}
+
 function blobChunkToBase64(blob) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -256,4 +287,63 @@ function blobChunkToBase64(blob) {
 function isTaintedCanvasError(err) {
   return err instanceof DOMException &&
     (err.name === 'SecurityError' || err.message.includes('Tainted'));
+}
+
+function logBitmapFallbackDiagnostics(details) {
+  const { format, imageNodeCount, filteredImageNodeCount, taintedImages, inaccessibleIframes } = details;
+
+  if (taintedImages.length === 0 && inaccessibleIframes.length === 0) return;
+
+  const summary = {
+    format,
+    imageNodeCount,
+    filteredImageNodeCount,
+    removedImageCount: Math.max(0, imageNodeCount - filteredImageNodeCount),
+    taintedImageCount: taintedImages.length,
+    inaccessibleIframeCount: inaccessibleIframes.length,
+  };
+
+  const unsafeImageRows = taintedImages.slice(0, 20).map((image) => ({
+    classification: image.classification,
+    originalType: image.originalType,
+    xpath: image.xpath,
+    url: truncateForLog(image.resolvedUrl ?? image.source),
+  }));
+  const iframeRows = inaccessibleIframes.slice(0, 20).map((iframe) => ({
+    reason: iframe.reason,
+    title: iframe.title,
+    src: truncateForLog(iframe.src),
+    errorName: iframe.errorName,
+  }));
+
+  if (typeof console.groupCollapsed === 'function') {
+    console.groupCollapsed(`[Web2Vector] Bitmap export hit a tainted canvas for ${format}`);
+    console.warn('[Web2Vector] Bitmap export diagnostics', summary);
+
+    if (unsafeImageRows.length > 0) {
+      console.warn('[Web2Vector] Suspect image sources', unsafeImageRows);
+    }
+
+    if (iframeRows.length > 0) {
+      console.warn('[Web2Vector] Inaccessible iframes', iframeRows);
+    }
+
+    console.groupEnd();
+    return;
+  }
+
+  console.warn('[Web2Vector] Bitmap export diagnostics', {
+    ...summary,
+    taintedImages: unsafeImageRows,
+    inaccessibleIframes: iframeRows,
+  });
+}
+
+function countImageNodes(irNodes) {
+  return irNodes.reduce((count, node) => count + (node?.type === 'image' ? 1 : 0), 0);
+}
+
+function truncateForLog(value, maxLength = 240) {
+  if (typeof value !== 'string' || value.length <= maxLength) return value ?? null;
+  return `${value.slice(0, maxLength - 3)}...`;
 }

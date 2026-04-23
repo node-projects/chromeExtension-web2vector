@@ -74,6 +74,13 @@ extensionApi.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return;
   }
 
+  if (message.type === 'fetch-image-data-url') {
+    void fetchImageDataUrl(message)
+      .then((response) => sendResponse(response))
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
+
   if (message.type === 'export-transfer-start') {
     sendResponse(handleTransferStart(message, sender));
     return;
@@ -234,6 +241,29 @@ async function handleResultBlob(blob, filename) {
   }
 }
 
+async function fetchImageDataUrl(message) {
+  if (typeof message?.url !== 'string' || message.url.length === 0) {
+    return { ok: false, error: 'Missing image URL' };
+  }
+
+  try {
+    const response = await fetch(message.url, {
+      credentials: 'include',
+      redirect: 'follow',
+    });
+
+    if (!response.ok) {
+      throw new Error(`Image request failed with status ${response.status}`);
+    }
+
+    const blob = await response.blob();
+    const dataUrl = await blobToImageDataUrl(blob, message.url);
+    return { ok: true, dataUrl };
+  } catch (error) {
+    return { ok: false, error: error?.message ?? String(error) };
+  }
+}
+
 async function createDownloadTargetFromBlob(blob) {
   if (shouldUseObjectUrlForBlobDownload()) {
     const objectUrl = URL.createObjectURL(blob);
@@ -289,6 +319,17 @@ async function blobToDataUrl(blob) {
   return `data:${blob.type || 'application/octet-stream'};base64,${base64}`;
 }
 
+async function blobToImageDataUrl(blob, sourceUrl) {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  const mime = detectImageMimeType(bytes, blob.type, sourceUrl);
+
+  if (!mime) {
+    throw new Error('Fetched resource was not a supported image');
+  }
+
+  return `data:${mime};base64,${bytesToBase64(bytes)}`;
+}
+
 function bytesToBase64(bytes) {
   const chunkSize = 0x8000;
   let binary = '';
@@ -299,6 +340,57 @@ function bytesToBase64(bytes) {
   }
 
   return btoa(binary);
+}
+
+function detectImageMimeType(bytes, declaredType, sourceUrl) {
+  const normalizedDeclaredType = normalizeMimeType(declaredType);
+  if (normalizedDeclaredType?.startsWith('image/')) {
+    return normalizedDeclaredType;
+  }
+
+  if (looksLikeSvgPayload(bytes) || looksLikeSvgUrl(sourceUrl)) {
+    return 'image/svg+xml';
+  }
+
+  if (matchesSignature(bytes, [0x89, 0x50, 0x4E, 0x47])) return 'image/png';
+  if (matchesSignature(bytes, [0xFF, 0xD8, 0xFF])) return 'image/jpeg';
+  if (matchesSignature(bytes, [0x47, 0x49, 0x46, 0x38])) return 'image/gif';
+  if (matchesSignature(bytes, [0x42, 0x4D])) return 'image/bmp';
+  if (matchesSignature(bytes, [0x52, 0x49, 0x46, 0x46]) && matchesSignature(bytes.subarray(8), [0x57, 0x45, 0x42, 0x50])) {
+    return 'image/webp';
+  }
+
+  return null;
+}
+
+function normalizeMimeType(mime) {
+  if (typeof mime !== 'string' || mime.length === 0) return null;
+  return mime.split(';', 1)[0].trim().toLowerCase() || null;
+}
+
+function matchesSignature(bytes, signature) {
+  if (bytes.length < signature.length) return false;
+
+  for (let index = 0; index < signature.length; index += 1) {
+    if (bytes[index] !== signature[index]) return false;
+  }
+
+  return true;
+}
+
+function looksLikeSvgPayload(bytes) {
+  if (bytes.length === 0) return false;
+
+  const sample = new TextDecoder().decode(bytes.subarray(0, Math.min(bytes.length, 2048)));
+  return sample.replace(/^\uFEFF/, '').trimStart().startsWith('<svg');
+}
+
+function looksLikeSvgUrl(sourceUrl) {
+  try {
+    return new URL(sourceUrl).pathname.toLowerCase().endsWith('.svg');
+  } catch {
+    return false;
+  }
 }
 
 function decodeExportChunk(chunkBase64) {

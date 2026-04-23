@@ -127,6 +127,51 @@ describe('service-worker message handling', () => {
     }, { timeout: 2000 });
   });
 
+  it('fetches image bytes via the service worker and returns a data URL', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      blob: vi.fn().mockResolvedValue(new Blob([
+        Uint8Array.from([0x89, 0x50, 0x4E, 0x47]),
+      ], { type: 'image/png' })),
+    });
+
+    try {
+      await import('../src/background/service-worker.js');
+      const sendResponse = vi.fn();
+      const keepChannelOpen = chrome._listeners.onMessage?.(
+        {
+          type: 'fetch-image-data-url',
+          url: 'https://cdn.example.net/logo.png',
+        },
+        {},
+        sendResponse,
+      );
+
+      expect(keepChannelOpen).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(sendResponse).toHaveBeenCalledWith(
+          expect.objectContaining({
+            ok: true,
+            dataUrl: expect.stringMatching(/^data:image\/png;base64,/),
+          }),
+        );
+      }, { timeout: 2000 });
+
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        'https://cdn.example.net/logo.png',
+        expect.objectContaining({
+          credentials: 'include',
+          redirect: 'follow',
+        }),
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('uses blob URLs for Firefox data-url downloads', async () => {
     const browser = createChromeStub();
     const originalCreateObjectURL = URL.createObjectURL;

@@ -15,6 +15,12 @@ describe('manifest.json', () => {
     );
   });
 
+  it('declares host permissions for cross-origin image fetching', () => {
+    expect(manifest.host_permissions).toEqual(
+      expect.arrayContaining(['<all_urls>']),
+    );
+  });
+
   it('has a service worker', () => {
     expect(manifest.background.service_worker).toBe('service-worker.js');
   });
@@ -37,6 +43,7 @@ describe('manifest.json', () => {
       scripts: ['service-worker.js'],
     });
     expect(firefoxManifest.permissions).toEqual(manifest.permissions);
+    expect(firefoxManifest.host_permissions).toEqual(manifest.host_permissions);
     expect(firefoxManifest.action).toEqual(manifest.action);
   });
 });
