@@ -1,6 +1,6 @@
 {
   "name": "web2vector-extension",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Export web pages as high-quality vector and image files directly from your browser. This extension uses layout2vector to convert page layouts into formats such as SVG, DXF, DWG, PDF and PNG, making it easy to reuse designs, archive content, or process graphics.",
   "private": true,
   "type": "module",
