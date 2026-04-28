@@ -9,12 +9,15 @@ import { addPolyfill } from 'get-box-quads-polyfill';
 import {
   extractIR,
   renderIR,
+  flattenStackingOrder,
+  getElementQuad,
   SVGWriter,
   HTMLWriter,
   PDFWriter,
   EMFWriter,
   EMFPlusWriter,
   ImageWriter,
+  traverseDOM,
 } from '@node-projects/layout2vector';
 
 if (!globalThis.__web2vector) {
@@ -22,7 +25,10 @@ if (!globalThis.__web2vector) {
 
   globalThis.__web2vector = {
     extractIR,
+    flattenStackingOrder,
+    getElementQuad,
     renderIR,
+    traverseDOM,
     writers: { SVGWriter, HTMLWriter, PDFWriter, EMFWriter, EMFPlusWriter, ImageWriter },
   };
 }

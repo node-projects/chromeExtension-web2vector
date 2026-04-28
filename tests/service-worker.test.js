@@ -79,6 +79,73 @@ describe('service-worker message handling', () => {
     expect(fileArgs).not.toContain('acad-writers.js');
   });
 
+  it('injects frame support into all frames before export', async () => {
+    await import('../src/background/service-worker.js');
+    chrome._listeners.onMessage?.({ action: 'export', format: 'svg' }, {});
+
+    await vi.waitFor(() => {
+      expect(chrome.scripting.executeScript).toHaveBeenCalledWith(
+        expect.objectContaining({
+          target: expect.objectContaining({
+            tabId: 42,
+            allFrames: true,
+          }),
+          files: ['core-lib.js', 'frame-support.js'],
+        }),
+      );
+    }, { timeout: 2000 });
+  });
+
+  it('skips transferring oversized precomputed IR back into the tab', async () => {
+    const hugeDataUrl = `data:image/png;base64,${'A'.repeat(9 * 1024 * 1024)}`;
+    chrome.scripting.executeScript.mockImplementation(async (config) => {
+      if (config?.target?.allFrames && Array.isArray(config?.args) && config.args.length === 1) {
+        return [{
+          frameId: 0,
+          result: {
+            frameKey: 'root-frame',
+            ir: [{
+              type: 'image',
+              quad: [
+                { x: 0, y: 0 },
+                { x: 1, y: 0 },
+                { x: 1, y: 1 },
+                { x: 0, y: 1 },
+              ],
+              dataUrl: hugeDataUrl,
+              width: 1,
+              height: 1,
+              style: {},
+              zIndex: 0,
+              source: {
+                xpath: '/html/body/img',
+                originalType: 'img',
+              },
+            }],
+            childFrames: [],
+            paintOrder: ['/html/body/img'],
+          },
+        }];
+      }
+
+      return [];
+    });
+
+    await import('../src/background/service-worker.js');
+    chrome._listeners.onMessage?.({ action: 'export', format: 'svg' }, {});
+
+    await vi.waitFor(() => {
+      const setterCall = chrome.scripting.executeScript.mock.calls.find((call) =>
+        typeof call[0]?.func === 'function'
+        && Array.isArray(call[0]?.args)
+        && call[0].args[0] === 'svg'
+      );
+
+      expect(setterCall).toBeTruthy();
+      expect(setterCall[0].args[1]).toBeNull();
+    }, { timeout: 2000 });
+  });
+
   it('lazy-loads dxf-writer.js for dxf-standard', async () => {
     await import('../src/background/service-worker.js');
     chrome._listeners.onMessage?.({ action: 'export', format: 'dxf-standard' }, {});

@@ -1,11 +1,25 @@
 import { FORMATS, CATEGORIES } from '../shared/formats.js';
 import { extensionApi } from '../shared/extension-api.js';
 import { base64ToBytes } from '../shared/export-transfer.js';
+import { mergeFrameExtractionResults } from '../shared/frame-merge.js';
 import { POPUP_STATUS_PORT_NAME } from '../shared/popup-status.js';
 
 const pendingDownloadUrls = new Map();
 const pendingTransfers = new Map();
 const popupPorts = new Set();
+const IMAGE_FETCH_TIMEOUT_MS = 12000;
+const FRAME_COLLECTION_TIMEOUT_MS = 45000;
+const PRECOMPUTED_IR_TRANSFER_MAX_BYTES = 8 * 1024 * 1024;
+
+const FRAME_EXTRACTION_OPTIONS = {
+  boxType: 'border',
+  includeText: true,
+  includeImages: true,
+  includeSourceMetadata: true,
+  includeInvisible: false,
+  convertFormControls: true,
+  includePseudoElements: true,
+};
 
 extensionApi.downloads.onChanged?.addListener((delta) => {
   const state = delta.state?.current;
@@ -108,20 +122,24 @@ async function startExport(tabId, format) {
   }
 
   try {
-    // 1. Set the requested format in the content-script world
+    const mergedIr = selectPrecomputedIrForTransfer(await collectMergedIrForTab(tabId));
+
+    // 1. Set the requested format and precomputed IR in the content-script world
     await extensionApi.scripting.executeScript({
       target: { tabId },
-      func: (f) => { globalThis.__web2vector_format = f; },
-      args: [format],
+      func: (f, ir) => {
+        globalThis.__web2vector_format = f;
+
+        if (Array.isArray(ir)) {
+          globalThis.__web2vector_precomputed_ir = ir;
+        } else {
+          delete globalThis.__web2vector_precomputed_ir;
+        }
+      },
+      args: [format, mergedIr],
     });
 
-    // 2. Inject core library (idempotent – skips if already loaded)
-    await extensionApi.scripting.executeScript({
-      target: { tabId },
-      files: ['core-lib.js'],
-    });
-
-    // 3. Lazy-load writer bundle when required
+    // 2. Lazy-load writer bundle when required
     if (fmt.bundle === 'dxf') {
       await extensionApi.scripting.executeScript({
         target: { tabId },
@@ -134,13 +152,82 @@ async function startExport(tabId, format) {
       });
     }
 
-    // 4. Run the export
+    // 3. Run the export
     await extensionApi.scripting.executeScript({
       target: { tabId },
       files: ['run-export.js'],
     });
   } catch (err) {
     notifyPopup('export-error', { error: err.message });
+  }
+}
+
+async function collectMergedIrForTab(tabId) {
+  try {
+    return await withTimeout((async () => {
+      await extensionApi.scripting.executeScript({
+        target: { tabId, allFrames: true },
+        files: ['core-lib.js', 'frame-support.js'],
+      });
+
+      await extensionApi.scripting.executeScript({
+        target: { tabId, allFrames: true },
+        func: () => globalThis.__web2vectorFrameSupport?.prepare?.() ?? null,
+      });
+
+      const frameResults = await extensionApi.scripting.executeScript({
+        target: { tabId, allFrames: true },
+        func: (options) => globalThis.__web2vectorFrameSupport?.collectFrameData?.(options) ?? null,
+        args: [FRAME_EXTRACTION_OPTIONS],
+      });
+
+      return mergeFrameExtractionResults(frameResults, { rootFrameId: 0 })?.ir ?? null;
+    })(), FRAME_COLLECTION_TIMEOUT_MS, () => {
+      console.warn('[Web2Vector] Timed out while collecting merged frame IR; falling back to in-page extraction.');
+      return null;
+    });
+  } catch {
+    return null;
+  }
+}
+
+function selectPrecomputedIrForTransfer(ir) {
+  if (!Array.isArray(ir)) return null;
+
+  const estimatedBytes = estimateSerializedSize(ir);
+  if (estimatedBytes <= PRECOMPUTED_IR_TRANSFER_MAX_BYTES) {
+    return ir;
+  }
+
+  console.warn(
+    `[Web2Vector] Skipping precomputed IR transfer (${estimatedBytes} bytes > ${PRECOMPUTED_IR_TRANSFER_MAX_BYTES}); falling back to in-page extraction.`
+  );
+  return null;
+}
+
+function estimateSerializedSize(value) {
+  try {
+    return JSON.stringify(value)?.length ?? Number.POSITIVE_INFINITY;
+  } catch {
+    return Number.POSITIVE_INFINITY;
+  }
+}
+
+async function withTimeout(promise, timeoutMs, onTimeout) {
+  let timeoutId = null;
+
+  const timeoutPromise = new Promise((resolve) => {
+    timeoutId = globalThis.setTimeout(() => {
+      resolve(onTimeout());
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeoutId !== null) {
+      globalThis.clearTimeout(timeoutId);
+    }
   }
 }
 
@@ -247,7 +334,7 @@ async function fetchImageDataUrl(message) {
   }
 
   try {
-    const response = await fetch(message.url, {
+    const response = await fetchWithTimeout(message.url, IMAGE_FETCH_TIMEOUT_MS, {
       credentials: 'include',
       redirect: 'follow',
     });
@@ -261,6 +348,20 @@ async function fetchImageDataUrl(message) {
     return { ok: true, dataUrl };
   } catch (error) {
     return { ok: false, error: error?.message ?? String(error) };
+  }
+}
+
+async function fetchWithTimeout(url, timeoutMs, init = {}) {
+  const controller = new AbortController();
+  const timeoutId = globalThis.setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: controller.signal,
+    });
+  } finally {
+    globalThis.clearTimeout(timeoutId);
   }
 }
 

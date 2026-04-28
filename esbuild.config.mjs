@@ -28,6 +28,7 @@ const contentEntries = [
   'src/content/core-lib.js',
   'src/content/dxf-writer.js',
   'src/content/acad-writers.js',
+  'src/content/frame-support.js',
   'src/content/run-export.js',
 ];
 

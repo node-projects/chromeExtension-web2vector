@@ -30,6 +30,11 @@ const PX_TO_MM = 25.4 / 96;
     const { extractIR, renderIR, writers } = lib;
 
     const root = document.documentElement;
+    const precomputedIr = Array.isArray(globalThis.__web2vector_precomputed_ir)
+      ? globalThis.__web2vector_precomputed_ir
+      : null;
+
+    delete globalThis.__web2vector_precomputed_ir;
 
     const BITMAP_FORMATS = ['png', 'jpeg', 'webp'];
     const isBitmap = BITMAP_FORMATS.includes(format);
@@ -40,13 +45,13 @@ const PX_TO_MM = 25.4 / 96;
         boxType: 'border',
         includeText: true,
         includeImages,
-        includeSourceMetadata: true,
+        includeSourceMetadata: false,
         walkIframes: true,
         convertFormControls: true,
       });
     }
 
-    let ir = await extract(true);
+    let ir = precomputedIr ?? await extract(true);
     ir = await resolveUnsafeImageSourcesViaExtension(ir);
     const { width, height } = calculateExportSize(root, ir);
     const maxY = height;
@@ -85,6 +90,11 @@ const PX_TO_MM = 25.4 / 96;
           } catch (retryError) {
             if (!isTaintedCanvasError(retryError)) throw retryError;
           }
+        }
+
+        if (precomputedIr) {
+          ir = stripAllImages(ir);
+          return renderBitmap(ir, mimeType, quality);
         }
 
         ir = await extract(false);
@@ -341,6 +351,10 @@ function logBitmapFallbackDiagnostics(details) {
 
 function countImageNodes(irNodes) {
   return irNodes.reduce((count, node) => count + (node?.type === 'image' ? 1 : 0), 0);
+}
+
+function stripAllImages(irNodes) {
+  return irNodes.filter((node) => node?.type !== 'image');
 }
 
 function truncateForLog(value, maxLength = 240) {
