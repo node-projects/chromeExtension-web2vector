@@ -9,6 +9,7 @@
 import { calculateExportSize } from './export-size.js';
 import { extensionApi } from '../shared/extension-api.js';
 import { EXPORT_STREAM_CHUNK_BYTES, createExportTransferId } from '../shared/export-transfer.js';
+import { normalizeTransferredFontAssets } from '../shared/font-assets.js';
 import {
   collectInaccessibleIframeDiagnostics,
   collectPotentiallyTaintedImageDiagnostics,
@@ -407,9 +408,5 @@ function shouldCollectFontAssets(format, exportOptions) {
 }
 
 function normalizeFontAssets(fontAssets) {
-  if (!fontAssets || !Array.isArray(fontAssets.faces) || fontAssets.faces.length === 0) {
-    return undefined;
-  }
-
-  return { faces: fontAssets.faces };
+  return normalizeTransferredFontAssets(fontAssets);
 }

@@ -180,6 +180,10 @@ describe('service-worker message handling', () => {
           ]),
         }),
       }));
+
+      const sourceData = setterCall[0].args[1].fontAssets.faces[0].sources[0].data;
+      expect(Array.isArray(sourceData)).toBe(true);
+      expect(sourceData).toEqual([1, 2, 3, 4]);
     }, { timeout: 2000 });
   });
 

@@ -1,3 +1,5 @@
+import { normalizeTransferredFontAssets } from './font-assets.js';
+
 const IDENTITY_TRANSFORM = { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
 
 export function mergeFrameExtractionResults(frameResults, options = {}) {
@@ -32,13 +34,7 @@ function normalizeFrameResults(frameResults) {
 }
 
 function normalizeFontAssets(fontAssets) {
-  if (!fontAssets || !Array.isArray(fontAssets.faces) || fontAssets.faces.length === 0) {
-    return undefined;
-  }
-
-  return {
-    faces: fontAssets.faces.filter((face) => Array.isArray(face?.sources) && face.sources.length > 0),
-  };
+  return normalizeTransferredFontAssets(fontAssets);
 }
 
 function mergeFontAssets(frameResults) {

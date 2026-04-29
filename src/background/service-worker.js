@@ -1,6 +1,7 @@
 import { FORMATS, CATEGORIES } from '../shared/formats.js';
 import { extensionApi } from '../shared/extension-api.js';
 import { base64ToBytes } from '../shared/export-transfer.js';
+import { serializeFontAssetsForTransfer } from '../shared/font-assets.js';
 import { mergeFrameExtractionResults } from '../shared/frame-merge.js';
 import { POPUP_STATUS_PORT_NAME } from '../shared/popup-status.js';
 
@@ -133,6 +134,7 @@ async function startExport(tabId, format, exportOptions = DEFAULT_EXPORT_OPTIONS
     const precomputedExport = selectPrecomputedExportForTransfer(
       await collectMergedIrForTab(tabId, format, normalizedOptions)
     );
+    const transferReadyPrecomputedExport = serializePrecomputedExportForTransfer(precomputedExport);
 
     // 1. Set the requested format and precomputed IR in the content-script world
     await extensionApi.scripting.executeScript({
@@ -158,7 +160,7 @@ async function startExport(tabId, format, exportOptions = DEFAULT_EXPORT_OPTIONS
           delete globalThis.__web2vector_export_options;
         }
       },
-      args: [format, precomputedExport, normalizedOptions],
+      args: [format, transferReadyPrecomputedExport, normalizedOptions],
     });
 
     // 2. Lazy-load writer bundle when required
@@ -231,6 +233,18 @@ function selectPrecomputedExportForTransfer(precomputedExport) {
     `[Web2Vector] Skipping precomputed IR transfer (${estimatedBytes} bytes > ${PRECOMPUTED_IR_TRANSFER_MAX_BYTES}); falling back to in-page extraction.`
   );
   return null;
+}
+
+function serializePrecomputedExportForTransfer(precomputedExport) {
+  if (!Array.isArray(precomputedExport?.ir)) {
+    return null;
+  }
+
+  const fontAssets = serializeFontAssetsForTransfer(precomputedExport.fontAssets);
+
+  return fontAssets
+    ? { ...precomputedExport, fontAssets }
+    : { ...precomputedExport };
 }
 
 function estimateTransferSize(value, seen = new Set()) {
