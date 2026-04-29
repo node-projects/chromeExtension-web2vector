@@ -96,6 +96,38 @@ describe('service-worker message handling', () => {
     }, { timeout: 2000 });
   });
 
+  it('passes root scroll expand through frame extraction and export setup', async () => {
+    await import('../src/background/service-worker.js');
+    chrome._listeners.onMessage?.({
+      action: 'export',
+      format: 'svg',
+      options: { rootScrollBehavior: 'expand' },
+    }, {});
+
+    await vi.waitFor(() => {
+      const frameCollectionCall = chrome.scripting.executeScript.mock.calls.find((call) =>
+        call[0]?.target?.allFrames === true
+        && typeof call[0]?.func === 'function'
+        && Array.isArray(call[0]?.args)
+        && call[0].args[0]?.boxType === 'border'
+      );
+
+      expect(frameCollectionCall).toBeTruthy();
+      expect(frameCollectionCall[0].args[0]).toEqual(expect.objectContaining({
+        rootScrollBehavior: 'expand',
+      }));
+
+      const exportSetupCall = chrome.scripting.executeScript.mock.calls.find((call) =>
+        typeof call[0]?.func === 'function'
+        && Array.isArray(call[0]?.args)
+        && call[0].args[0] === 'svg'
+      );
+
+      expect(exportSetupCall).toBeTruthy();
+      expect(exportSetupCall[0].args[2]).toEqual({ rootScrollBehavior: 'expand' });
+    }, { timeout: 2000 });
+  });
+
   it('skips transferring oversized precomputed IR back into the tab', async () => {
     const hugeDataUrl = `data:image/png;base64,${'A'.repeat(9 * 1024 * 1024)}`;
     chrome.scripting.executeScript.mockImplementation(async (config) => {

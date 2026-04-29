@@ -10,6 +10,9 @@ const popupPorts = new Set();
 const IMAGE_FETCH_TIMEOUT_MS = 12000;
 const FRAME_COLLECTION_TIMEOUT_MS = 45000;
 const PRECOMPUTED_IR_TRANSFER_MAX_BYTES = 8 * 1024 * 1024;
+const DEFAULT_EXPORT_OPTIONS = Object.freeze({
+  rootScrollBehavior: 'clip',
+});
 
 const FRAME_EXTRACTION_OPTIONS = {
   boxType: 'border',
@@ -53,7 +56,7 @@ extensionApi.runtime.onInstalled.addListener(() => {
 extensionApi.contextMenus.onClicked.addListener((info, tab) => {
   if (!info.menuItemId.startsWith('export-')) return;
   const format = info.menuItemId.slice('export-'.length);
-  startExport(tab.id, format);
+  startExport(tab.id, format, DEFAULT_EXPORT_OPTIONS);
 });
 
 extensionApi.runtime.onConnect?.addListener((port) => {
@@ -69,8 +72,9 @@ extensionApi.runtime.onConnect?.addListener((port) => {
 extensionApi.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // From popup: start an export
   if (message.action === 'export') {
+    const exportOptions = normalizeExportOptions(message.options);
     extensionApi.tabs.query({ active: true, currentWindow: true }).then(([tab]) => {
-      if (tab) startExport(tab.id, message.format);
+      if (tab) startExport(tab.id, message.format, exportOptions);
     });
     return;
   }
@@ -114,7 +118,7 @@ extensionApi.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 // ── Export orchestration ──────────────────────────────────
-async function startExport(tabId, format) {
+async function startExport(tabId, format, exportOptions = DEFAULT_EXPORT_OPTIONS) {
   const fmt = FORMATS[format];
   if (!fmt) {
     notifyPopup('export-error', { error: `Unknown format: ${format}` });
@@ -122,12 +126,13 @@ async function startExport(tabId, format) {
   }
 
   try {
-    const mergedIr = selectPrecomputedIrForTransfer(await collectMergedIrForTab(tabId));
+    const normalizedOptions = normalizeExportOptions(exportOptions);
+    const mergedIr = selectPrecomputedIrForTransfer(await collectMergedIrForTab(tabId, normalizedOptions));
 
     // 1. Set the requested format and precomputed IR in the content-script world
     await extensionApi.scripting.executeScript({
       target: { tabId },
-      func: (f, ir) => {
+      func: (f, ir, options) => {
         globalThis.__web2vector_format = f;
 
         if (Array.isArray(ir)) {
@@ -135,8 +140,14 @@ async function startExport(tabId, format) {
         } else {
           delete globalThis.__web2vector_precomputed_ir;
         }
+
+        if (options && typeof options === 'object') {
+          globalThis.__web2vector_export_options = options;
+        } else {
+          delete globalThis.__web2vector_export_options;
+        }
       },
-      args: [format, mergedIr],
+      args: [format, mergedIr, normalizedOptions],
     });
 
     // 2. Lazy-load writer bundle when required
@@ -162,7 +173,7 @@ async function startExport(tabId, format) {
   }
 }
 
-async function collectMergedIrForTab(tabId) {
+async function collectMergedIrForTab(tabId, exportOptions = DEFAULT_EXPORT_OPTIONS) {
   try {
     return await withTimeout((async () => {
       await extensionApi.scripting.executeScript({
@@ -178,7 +189,10 @@ async function collectMergedIrForTab(tabId) {
       const frameResults = await extensionApi.scripting.executeScript({
         target: { tabId, allFrames: true },
         func: (options) => globalThis.__web2vectorFrameSupport?.collectFrameData?.(options) ?? null,
-        args: [FRAME_EXTRACTION_OPTIONS],
+        args: [{
+          ...FRAME_EXTRACTION_OPTIONS,
+          rootScrollBehavior: normalizeExportOptions(exportOptions).rootScrollBehavior,
+        }],
       });
 
       return mergeFrameExtractionResults(frameResults, { rootFrameId: 0 })?.ir ?? null;
@@ -211,6 +225,12 @@ function estimateSerializedSize(value) {
   } catch {
     return Number.POSITIVE_INFINITY;
   }
+}
+
+function normalizeExportOptions(options) {
+  return {
+    rootScrollBehavior: options?.rootScrollBehavior === 'expand' ? 'expand' : 'clip',
+  };
 }
 
 async function withTimeout(promise, timeoutMs, onTimeout) {

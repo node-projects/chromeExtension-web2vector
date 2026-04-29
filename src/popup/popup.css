@@ -84,6 +84,35 @@ body {
   font-family: 'SFMono-Regular', Consolas, monospace;
 }
 
+/* ── Export options ── */
+.options-panel {
+  margin-top: 10px;
+  padding: 9px 10px;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.option-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+  color: #333;
+  cursor: pointer;
+}
+
+.option-toggle input {
+  margin-top: 1px;
+}
+
+.option-hint {
+  margin-top: 5px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #777;
+}
+
 /* ── Status bar ── */
 .status {
   margin-top: 10px;

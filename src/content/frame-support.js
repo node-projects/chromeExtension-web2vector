@@ -39,11 +39,12 @@ async function collectFrameData(options = {}) {
     includeSourceMetadata: options.includeSourceMetadata ?? true,
     includeInvisible: options.includeInvisible ?? false,
     walkIframes: false,
+    rootScrollBehavior: options.rootScrollBehavior ?? 'clip',
     convertFormControls: options.convertFormControls ?? true,
     includePseudoElements: options.includePseudoElements ?? true,
   };
 
-  const paintOrder = collectPaintOrder(root, extractOptions.includeInvisible ?? false, lib);
+  const paintOrder = collectPaintOrder(root, extractOptions, lib);
   const ir = await lib.extractIR(root, extractOptions);
   const childFrames = await collectChildFrameMappings(root, extractOptions.includeInvisible ?? false, lib);
 
@@ -55,12 +56,14 @@ async function collectFrameData(options = {}) {
   };
 }
 
-function collectPaintOrder(root, includeInvisible, lib) {
+function collectPaintOrder(root, extractOptions, lib) {
   if (typeof lib.traverseDOM !== 'function' || typeof lib.flattenStackingOrder !== 'function') {
     return [];
   }
 
-  const stackingTree = lib.traverseDOM(root, includeInvisible, false);
+  const stackingTree = lib.traverseDOM(root, extractOptions.includeInvisible ?? false, false, {
+    rootScrollBehavior: extractOptions.rootScrollBehavior,
+  });
   return lib.flattenStackingOrder(stackingTree).map((node) => getElementXPath(node.element));
 }
 

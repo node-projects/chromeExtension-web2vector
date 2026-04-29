@@ -3,6 +3,7 @@ import { extensionApi } from '../shared/extension-api.js';
 import { POPUP_STATUS_PORT_NAME } from '../shared/popup-status.js';
 
 const list = document.getElementById('format-list');
+const rootScrollExpand = document.getElementById('root-scroll-expand');
 const status = document.getElementById('status');
 let statusPort = null;
 
@@ -36,10 +37,12 @@ for (const [cat, label] of Object.entries(CATEGORIES)) {
 // ── Export logic ──────────────────────────────────────────
 let exporting = false;
 
-function setButtons(enabled) {
+function setControlsEnabled(enabled) {
   for (const btn of list.querySelectorAll('.format-btn')) {
     btn.disabled = !enabled;
   }
+
+  rootScrollExpand.disabled = !enabled;
 }
 
 function showStatus(text, type) {
@@ -47,13 +50,23 @@ function showStatus(text, type) {
   status.className = `status ${type}`;
 }
 
+function getExportOptions() {
+  return {
+    rootScrollBehavior: rootScrollExpand.checked ? 'expand' : 'clip',
+  };
+}
+
 function startExport(format) {
   if (exporting) return;
   exporting = true;
-  setButtons(false);
+  setControlsEnabled(false);
   showStatus('Exporting\u2026', 'loading');
 
-  extensionApi.runtime.sendMessage({ action: 'export', format });
+  extensionApi.runtime.sendMessage({
+    action: 'export',
+    format,
+    options: getExportOptions(),
+  });
 }
 
 // ── Listen for result from background ─────────────────────
@@ -61,12 +74,12 @@ function handleStatusMessage(msg) {
   if (msg.action === 'export-complete') {
     showStatus('Download started!', 'success');
     exporting = false;
-    setButtons(true);
+    setControlsEnabled(true);
   }
   if (msg.action === 'export-error') {
     showStatus(msg.error ?? 'Export failed', 'error');
     exporting = false;
-    setButtons(true);
+    setControlsEnabled(true);
   }
 }
 

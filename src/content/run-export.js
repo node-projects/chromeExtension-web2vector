@@ -1,7 +1,7 @@
 /**
  * Run-export script — injected each time the user requests an export.
  *
- * Reads the requested format from globalThis.__web2vector_format,
+ * Reads the requested format and export options from globalThis,
  * performs the export via layout2vector, converts the result to a
  * data-URL, and sends it to the background service worker which
  * triggers chrome.downloads.download({ saveAs: true }).
@@ -30,11 +30,13 @@ const PX_TO_MM = 25.4 / 96;
     const { extractIR, renderIR, writers } = lib;
 
     const root = document.documentElement;
+    const exportOptions = normalizeExportOptions(globalThis.__web2vector_export_options);
     const precomputedIr = Array.isArray(globalThis.__web2vector_precomputed_ir)
       ? globalThis.__web2vector_precomputed_ir
       : null;
 
     delete globalThis.__web2vector_precomputed_ir;
+    delete globalThis.__web2vector_export_options;
 
     const BITMAP_FORMATS = ['png', 'jpeg', 'webp'];
     const isBitmap = BITMAP_FORMATS.includes(format);
@@ -47,6 +49,7 @@ const PX_TO_MM = 25.4 / 96;
         includeImages,
         includeSourceMetadata: false,
         walkIframes: true,
+        rootScrollBehavior: exportOptions.rootScrollBehavior,
         convertFormControls: true,
       });
     }
@@ -360,4 +363,10 @@ function stripAllImages(irNodes) {
 function truncateForLog(value, maxLength = 240) {
   if (typeof value !== 'string' || value.length <= maxLength) return value ?? null;
   return `${value.slice(0, maxLength - 3)}...`;
+}
+
+function normalizeExportOptions(options) {
+  return {
+    rootScrollBehavior: options?.rootScrollBehavior === 'expand' ? 'expand' : 'clip',
+  };
 }

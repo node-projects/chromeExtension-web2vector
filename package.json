@@ -17,7 +17,7 @@
   },
   "dependencies": {
     "@chenglou/pretext": "^0.0.6",
-    "@node-projects/layout2vector": "^5.18.0",
+    "@node-projects/layout2vector": "^5.19.0",
     "get-box-quads-polyfill": "^4.36.0"
   },
   "devDependencies": {
