@@ -8,6 +8,7 @@
 import { addPolyfill } from 'get-box-quads-polyfill';
 import {
   extractIR,
+  extractIRWithAssets,
   renderIR,
   flattenStackingOrder,
   getElementQuad,
@@ -25,6 +26,7 @@ if (!globalThis.__web2vector) {
 
   globalThis.__web2vector = {
     extractIR,
+    extractIRWithAssets,
     flattenStackingOrder,
     getElementQuad,
     renderIR,

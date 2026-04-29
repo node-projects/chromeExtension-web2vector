@@ -114,6 +114,7 @@ describe('service-worker message handling', () => {
 
       expect(frameCollectionCall).toBeTruthy();
       expect(frameCollectionCall[0].args[0]).toEqual(expect.objectContaining({
+        includeFonts: true,
         rootScrollBehavior: 'expand',
       }));
 
@@ -124,7 +125,61 @@ describe('service-worker message handling', () => {
       );
 
       expect(exportSetupCall).toBeTruthy();
-      expect(exportSetupCall[0].args[2]).toEqual({ rootScrollBehavior: 'expand' });
+      expect(exportSetupCall[0].args[2]).toEqual({
+        rootScrollBehavior: 'expand',
+        embedFonts: true,
+        pdfUseFontEditorCore: true,
+      });
+    }, { timeout: 2000 });
+  });
+
+  it('transfers merged font assets back into the tab for compatible formats', async () => {
+    chrome.scripting.executeScript.mockImplementation(async (config) => {
+      if (config?.target?.allFrames && Array.isArray(config?.args) && config.args.length === 1) {
+        return [
+          {
+            frameId: 0,
+            result: {
+              frameKey: 'root-frame',
+              ir: [],
+              childFrames: [],
+              paintOrder: [],
+              fontAssets: {
+                faces: [{
+                  family: 'Embed Sans',
+                  sources: [{
+                    format: 'woff2',
+                    mimeType: 'font/woff2',
+                    data: new Uint8Array([1, 2, 3, 4]),
+                  }],
+                }],
+              },
+            },
+          },
+        ];
+      }
+
+      return [];
+    });
+
+    await import('../src/background/service-worker.js');
+    chrome._listeners.onMessage?.({ action: 'export', format: 'pdf' }, {});
+
+    await vi.waitFor(() => {
+      const setterCall = chrome.scripting.executeScript.mock.calls.find((call) =>
+        typeof call[0]?.func === 'function'
+        && Array.isArray(call[0]?.args)
+        && call[0].args[0] === 'pdf'
+      );
+
+      expect(setterCall).toBeTruthy();
+      expect(setterCall[0].args[1]).toEqual(expect.objectContaining({
+        fontAssets: expect.objectContaining({
+          faces: expect.arrayContaining([
+            expect.objectContaining({ family: 'Embed Sans' }),
+          ]),
+        }),
+      }));
     }, { timeout: 2000 });
   });
 

@@ -18,6 +18,7 @@ import {
 } from './export-utils.js';
 
 const PX_TO_MM = 25.4 / 96;
+const FONT_ASSET_FORMATS = new Set(['html', 'svg', 'pdf']);
 
 (async () => {
   try {
@@ -27,15 +28,18 @@ const PX_TO_MM = 25.4 / 96;
     const lib = globalThis.__web2vector;
     if (!lib) throw new Error('Core library not loaded');
 
-    const { extractIR, renderIR, writers } = lib;
+    const { extractIR, extractIRWithAssets, renderIR, writers } = lib;
 
     const root = document.documentElement;
     const exportOptions = normalizeExportOptions(globalThis.__web2vector_export_options);
+    const shouldCollectFonts = shouldCollectFontAssets(format, exportOptions);
     const precomputedIr = Array.isArray(globalThis.__web2vector_precomputed_ir)
       ? globalThis.__web2vector_precomputed_ir
       : null;
+    const precomputedFontAssets = normalizeFontAssets(globalThis.__web2vector_precomputed_font_assets);
 
     delete globalThis.__web2vector_precomputed_ir;
+    delete globalThis.__web2vector_precomputed_font_assets;
     delete globalThis.__web2vector_export_options;
 
     const BITMAP_FORMATS = ['png', 'jpeg', 'webp'];
@@ -43,18 +47,31 @@ const PX_TO_MM = 25.4 / 96;
 
     // ── Extract IR ────────────────────────────────────────
     async function extract(includeImages) {
-      return extractIR(root, {
+      const extractOptions = {
         boxType: 'border',
         includeText: true,
         includeImages,
+        includeFonts: shouldCollectFonts,
         includeSourceMetadata: false,
         walkIframes: true,
         rootScrollBehavior: exportOptions.rootScrollBehavior,
         convertFormControls: true,
-      });
+      };
+
+      if (shouldCollectFonts && typeof extractIRWithAssets === 'function') {
+        return extractIRWithAssets(root, extractOptions);
+      }
+
+      return {
+        ir: await extractIR(root, extractOptions),
+      };
     }
 
-    let ir = precomputedIr ?? await extract(true);
+    const extracted = precomputedIr
+      ? { ir: precomputedIr, fontAssets: precomputedFontAssets }
+      : await extract(true);
+    let ir = Array.isArray(extracted?.ir) ? extracted.ir : [];
+    const fontAssets = normalizeFontAssets(extracted?.fontAssets);
     ir = await resolveUnsafeImageSourcesViaExtension(ir);
     const { width, height } = calculateExportSize(root, ir);
     const maxY = height;
@@ -108,7 +125,12 @@ const PX_TO_MM = 25.4 / 96;
     switch (format) {
       /* ── Vector ── */
       case 'svg': {
-        const w = new writers.SVGWriter({ width, height });
+        const w = new writers.SVGWriter({
+          width,
+          height,
+          fontAssets,
+          fontMode: fontAssets ? { type: 'inline' } : { type: 'none' },
+        });
         data = await renderIR(ir, w);
         mime = 'image/svg+xml';
         ext = '.svg';
@@ -161,6 +183,8 @@ const PX_TO_MM = 25.4 / 96;
         const w = new writers.PDFWriter({
           pageWidth: width * PX_TO_MM,
           pageHeight: height * PX_TO_MM,
+          fontAssets,
+          useFontEditorCore: exportOptions.pdfUseFontEditorCore,
         });
         const doc = await renderIR(ir, w);
         await doc.finalize();
@@ -170,7 +194,12 @@ const PX_TO_MM = 25.4 / 96;
         break;
       }
       case 'html': {
-        const w = new writers.HTMLWriter({ width, height });
+        const w = new writers.HTMLWriter({
+          width,
+          height,
+          fontAssets,
+          fontMode: fontAssets ? { type: 'inline' } : { type: 'none' },
+        });
         data = await renderIR(ir, w);
         mime = 'text/html';
         ext = '.html';
@@ -368,5 +397,19 @@ function truncateForLog(value, maxLength = 240) {
 function normalizeExportOptions(options) {
   return {
     rootScrollBehavior: options?.rootScrollBehavior === 'expand' ? 'expand' : 'clip',
+    embedFonts: options?.embedFonts !== false,
+    pdfUseFontEditorCore: options?.pdfUseFontEditorCore !== false,
   };
+}
+
+function shouldCollectFontAssets(format, exportOptions) {
+  return FONT_ASSET_FORMATS.has(format) && exportOptions?.embedFonts !== false;
+}
+
+function normalizeFontAssets(fontAssets) {
+  if (!fontAssets || !Array.isArray(fontAssets.faces) || fontAssets.faces.length === 0) {
+    return undefined;
+  }
+
+  return { faces: fontAssets.faces };
 }

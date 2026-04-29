@@ -14,6 +14,7 @@ export function mergeFrameExtractionResults(frameResults, options = {}) {
   return {
     rootFrameKey: rootFrame.frameKey,
     ir: mergedIr,
+    fontAssets: mergeFontAssets(normalizedResults),
   };
 }
 
@@ -23,10 +24,32 @@ function normalizeFrameResults(frameResults) {
       frameId: entry?.frameId ?? null,
       frameKey: entry?.result?.frameKey,
       ir: Array.isArray(entry?.result?.ir) ? entry.result.ir : [],
+      fontAssets: normalizeFontAssets(entry?.result?.fontAssets),
       childFrames: Array.isArray(entry?.result?.childFrames) ? entry.result.childFrames : [],
       paintOrder: Array.isArray(entry?.result?.paintOrder) ? entry.result.paintOrder : [],
     }))
     .filter((entry) => typeof entry.frameKey === 'string' && entry.frameKey.length > 0);
+}
+
+function normalizeFontAssets(fontAssets) {
+  if (!fontAssets || !Array.isArray(fontAssets.faces) || fontAssets.faces.length === 0) {
+    return undefined;
+  }
+
+  return {
+    faces: fontAssets.faces.filter((face) => Array.isArray(face?.sources) && face.sources.length > 0),
+  };
+}
+
+function mergeFontAssets(frameResults) {
+  const faces = [];
+
+  for (const frameResult of frameResults) {
+    if (!frameResult.fontAssets?.faces?.length) continue;
+    faces.push(...frameResult.fontAssets.faces);
+  }
+
+  return faces.length > 0 ? { faces } : undefined;
 }
 
 function mergeFrameTree(frameKey, frameMap, coordinateTransform, inheritedClipQuads, visitedFrameKeys) {

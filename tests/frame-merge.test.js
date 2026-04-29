@@ -165,4 +165,53 @@ describe('frame IR merging', () => {
     expect(merged?.ir[0].style.clipQuads).toHaveLength(2);
     expect(merged?.ir[0].style.clipQuads[1].points[0]).toEqual({ x: 12, y: 8 });
   });
+
+  it('merges font assets from all collected frames', () => {
+    const merged = mergeFrameExtractionResults([
+      {
+        frameId: 0,
+        result: {
+          frameKey: 'root',
+          paintOrder: [],
+          childFrames: [],
+          ir: [],
+          fontAssets: {
+            faces: [{
+              family: 'Root Sans',
+              sources: [{
+                format: 'woff2',
+                mimeType: 'font/woff2',
+                data: new Uint8Array([1, 2, 3]),
+              }],
+            }],
+          },
+        },
+      },
+      {
+        frameId: 1,
+        result: {
+          frameKey: 'child',
+          paintOrder: [],
+          childFrames: [],
+          ir: [],
+          fontAssets: {
+            faces: [{
+              family: 'Child Serif',
+              style: 'italic',
+              sources: [{
+                format: 'ttf',
+                mimeType: 'font/ttf',
+                data: new Uint8Array([4, 5, 6]),
+              }],
+            }],
+          },
+        },
+      },
+    ], { rootFrameId: 0 });
+
+    expect(merged?.fontAssets?.faces.map((face) => face.family)).toEqual([
+      'Root Sans',
+      'Child Serif',
+    ]);
+  });
 });

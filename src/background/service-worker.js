@@ -10,8 +10,11 @@ const popupPorts = new Set();
 const IMAGE_FETCH_TIMEOUT_MS = 12000;
 const FRAME_COLLECTION_TIMEOUT_MS = 45000;
 const PRECOMPUTED_IR_TRANSFER_MAX_BYTES = 8 * 1024 * 1024;
+const FONT_ASSET_FORMATS = new Set(['html', 'svg', 'pdf']);
 const DEFAULT_EXPORT_OPTIONS = Object.freeze({
   rootScrollBehavior: 'clip',
+  embedFonts: true,
+  pdfUseFontEditorCore: true,
 });
 
 const FRAME_EXTRACTION_OPTIONS = {
@@ -127,18 +130,26 @@ async function startExport(tabId, format, exportOptions = DEFAULT_EXPORT_OPTIONS
 
   try {
     const normalizedOptions = normalizeExportOptions(exportOptions);
-    const mergedIr = selectPrecomputedIrForTransfer(await collectMergedIrForTab(tabId, normalizedOptions));
+    const precomputedExport = selectPrecomputedExportForTransfer(
+      await collectMergedIrForTab(tabId, format, normalizedOptions)
+    );
 
     // 1. Set the requested format and precomputed IR in the content-script world
     await extensionApi.scripting.executeScript({
       target: { tabId },
-      func: (f, ir, options) => {
+      func: (f, precomputed, options) => {
         globalThis.__web2vector_format = f;
 
-        if (Array.isArray(ir)) {
-          globalThis.__web2vector_precomputed_ir = ir;
+        if (Array.isArray(precomputed?.ir)) {
+          globalThis.__web2vector_precomputed_ir = precomputed.ir;
         } else {
           delete globalThis.__web2vector_precomputed_ir;
+        }
+
+        if (precomputed?.fontAssets && Array.isArray(precomputed.fontAssets.faces)) {
+          globalThis.__web2vector_precomputed_font_assets = precomputed.fontAssets;
+        } else {
+          delete globalThis.__web2vector_precomputed_font_assets;
         }
 
         if (options && typeof options === 'object') {
@@ -147,7 +158,7 @@ async function startExport(tabId, format, exportOptions = DEFAULT_EXPORT_OPTIONS
           delete globalThis.__web2vector_export_options;
         }
       },
-      args: [format, mergedIr, normalizedOptions],
+      args: [format, precomputedExport, normalizedOptions],
     });
 
     // 2. Lazy-load writer bundle when required
@@ -173,9 +184,11 @@ async function startExport(tabId, format, exportOptions = DEFAULT_EXPORT_OPTIONS
   }
 }
 
-async function collectMergedIrForTab(tabId, exportOptions = DEFAULT_EXPORT_OPTIONS) {
+async function collectMergedIrForTab(tabId, format, exportOptions = DEFAULT_EXPORT_OPTIONS) {
   try {
     return await withTimeout((async () => {
+      const normalizedOptions = normalizeExportOptions(exportOptions);
+
       await extensionApi.scripting.executeScript({
         target: { tabId, allFrames: true },
         files: ['core-lib.js', 'frame-support.js'],
@@ -191,11 +204,12 @@ async function collectMergedIrForTab(tabId, exportOptions = DEFAULT_EXPORT_OPTIO
         func: (options) => globalThis.__web2vectorFrameSupport?.collectFrameData?.(options) ?? null,
         args: [{
           ...FRAME_EXTRACTION_OPTIONS,
-          rootScrollBehavior: normalizeExportOptions(exportOptions).rootScrollBehavior,
+          includeFonts: shouldCollectFontAssets(format, normalizedOptions),
+          rootScrollBehavior: normalizedOptions.rootScrollBehavior,
         }],
       });
 
-      return mergeFrameExtractionResults(frameResults, { rootFrameId: 0 })?.ir ?? null;
+      return mergeFrameExtractionResults(frameResults, { rootFrameId: 0 });
     })(), FRAME_COLLECTION_TIMEOUT_MS, () => {
       console.warn('[Web2Vector] Timed out while collecting merged frame IR; falling back to in-page extraction.');
       return null;
@@ -205,12 +219,12 @@ async function collectMergedIrForTab(tabId, exportOptions = DEFAULT_EXPORT_OPTIO
   }
 }
 
-function selectPrecomputedIrForTransfer(ir) {
-  if (!Array.isArray(ir)) return null;
+function selectPrecomputedExportForTransfer(precomputedExport) {
+  if (!Array.isArray(precomputedExport?.ir)) return null;
 
-  const estimatedBytes = estimateSerializedSize(ir);
+  const estimatedBytes = estimateTransferSize(precomputedExport);
   if (estimatedBytes <= PRECOMPUTED_IR_TRANSFER_MAX_BYTES) {
-    return ir;
+    return precomputedExport;
   }
 
   console.warn(
@@ -219,18 +233,52 @@ function selectPrecomputedIrForTransfer(ir) {
   return null;
 }
 
-function estimateSerializedSize(value) {
-  try {
-    return JSON.stringify(value)?.length ?? Number.POSITIVE_INFINITY;
-  } catch {
-    return Number.POSITIVE_INFINITY;
+function estimateTransferSize(value, seen = new Set()) {
+  if (value == null) return 0;
+
+  const valueType = typeof value;
+  if (valueType === 'string') return value.length;
+  if (valueType === 'number') return 8;
+  if (valueType === 'boolean') return 4;
+
+  if (ArrayBuffer.isView(value)) {
+    return value.byteLength;
   }
+
+  if (value instanceof ArrayBuffer) {
+    return value.byteLength;
+  }
+
+  if (valueType !== 'object') {
+    return 0;
+  }
+
+  if (seen.has(value)) {
+    return 0;
+  }
+
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    return value.reduce((total, entry) => total + estimateTransferSize(entry, seen), 0);
+  }
+
+  return Object.entries(value).reduce(
+    (total, [key, entry]) => total + key.length + estimateTransferSize(entry, seen),
+    0,
+  );
 }
 
 function normalizeExportOptions(options) {
   return {
     rootScrollBehavior: options?.rootScrollBehavior === 'expand' ? 'expand' : 'clip',
+    embedFonts: options?.embedFonts !== false,
+    pdfUseFontEditorCore: options?.pdfUseFontEditorCore !== false,
   };
+}
+
+function shouldCollectFontAssets(format, exportOptions) {
+  return FONT_ASSET_FORMATS.has(format) && exportOptions?.embedFonts !== false;
 }
 
 async function withTimeout(promise, timeoutMs, onTimeout) {

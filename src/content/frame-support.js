@@ -27,6 +27,7 @@ async function collectFrameData(options = {}) {
     return {
       frameKey: getFrameKey(),
       ir: [],
+      fontAssets: undefined,
       childFrames: [],
       paintOrder: [],
     };
@@ -36,6 +37,7 @@ async function collectFrameData(options = {}) {
     boxType: options.boxType ?? 'border',
     includeText: options.includeText ?? true,
     includeImages: options.includeImages ?? true,
+    includeFonts: options.includeFonts ?? false,
     includeSourceMetadata: options.includeSourceMetadata ?? true,
     includeInvisible: options.includeInvisible ?? false,
     walkIframes: false,
@@ -45,15 +47,26 @@ async function collectFrameData(options = {}) {
   };
 
   const paintOrder = collectPaintOrder(root, extractOptions, lib);
-  const ir = await lib.extractIR(root, extractOptions);
+  const extractionResult = extractOptions.includeFonts && typeof lib.extractIRWithAssets === 'function'
+    ? await lib.extractIRWithAssets(root, extractOptions)
+    : { ir: await lib.extractIR(root, extractOptions) };
   const childFrames = await collectChildFrameMappings(root, extractOptions.includeInvisible ?? false, lib);
 
   return {
     frameKey: getFrameKey(),
-    ir,
+    ir: Array.isArray(extractionResult?.ir) ? extractionResult.ir : [],
+    fontAssets: normalizeFontAssets(extractionResult?.fontAssets),
     childFrames,
     paintOrder,
   };
+}
+
+function normalizeFontAssets(fontAssets) {
+  if (!fontAssets || !Array.isArray(fontAssets.faces) || fontAssets.faces.length === 0) {
+    return undefined;
+  }
+
+  return { faces: fontAssets.faces };
 }
 
 function collectPaintOrder(root, extractOptions, lib) {
