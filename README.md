@@ -3,6 +3,7 @@
 A browser extension that exports any web page's rendered DOM to **10 output formats** using the [@node-projects/layout2vector](https://github.com/node-projects/layout2vector) library.
 
 Install the Chrome version from the [Chrome Web Store](https://chromewebstore.google.com/detail/web2vector/ojjkecepeobhmpilhdhcjcgpdjhnkjgl).
+Install the Firefox version from [Firefox Add-ons](https://addons.mozilla.org/de/developers/addon/web2vector).
 
 <p align="center">
   <img src="src/icons/icon.svg" width="128" alt="Web2Vector icon" />

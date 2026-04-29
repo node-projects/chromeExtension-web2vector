@@ -1,6 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
-import { createFirefoxManifest } from '../scripts/manifest-utils.mjs';
+import {
+  createFirefoxManifest,
+  DEFAULT_FIREFOX_ADDON_ID,
+  DEFAULT_FIREFOX_DATA_COLLECTION_PERMISSIONS,
+} from '../scripts/manifest-utils.mjs';
 
 describe('manifest.json', () => {
   const manifest = JSON.parse(fs.readFileSync('manifest.json', 'utf8'));
@@ -41,6 +45,12 @@ describe('manifest.json', () => {
     expect(firefoxManifest.manifest_version).toBe(3);
     expect(firefoxManifest.background).toEqual({
       scripts: ['service-worker.js'],
+    });
+    expect(firefoxManifest.browser_specific_settings).toEqual({
+      gecko: expect.objectContaining({
+        id: DEFAULT_FIREFOX_ADDON_ID,
+        data_collection_permissions: DEFAULT_FIREFOX_DATA_COLLECTION_PERMISSIONS,
+      }),
     });
     expect(firefoxManifest.permissions).toEqual(manifest.permissions);
     expect(firefoxManifest.host_permissions).toEqual(manifest.host_permissions);
