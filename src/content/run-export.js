@@ -7,6 +7,7 @@
  * triggers chrome.downloads.download({ saveAs: true }).
  */
 import { calculateExportSize } from './export-size.js';
+import pako from 'pako';
 import { extensionApi } from '../shared/extension-api.js';
 import { EXPORT_STREAM_CHUNK_BYTES, createExportTransferId } from '../shared/export-transfer.js';
 import { normalizeTransferredFontAssets } from '../shared/font-assets.js';
@@ -20,6 +21,11 @@ import {
 
 const PX_TO_MM = 25.4 / 96;
 const FONT_ASSET_FORMATS = new Set(['html', 'svg', 'pdf']);
+const PDF_FONT_SOURCE_PRIORITY = ['ttf', 'otf', 'woff', 'woff2'];
+const PDF_CONVERTIBLE_FONT_SOURCE_FORMATS = new Set(['otf', 'woff', 'woff2']);
+
+let fontEditorCorePromise = null;
+let woff2InitPromise = null;
 
 (async () => {
   try {
@@ -181,11 +187,14 @@ const FONT_ASSET_FORMATS = new Set(['html', 'svg', 'pdf']);
 
       /* ── Document ── */
       case 'pdf': {
+        const pdfFontAssets = await preparePdfFontAssets(fontAssets, exportOptions.pdfUseFontEditorCore);
+
         const w = new writers.PDFWriter({
           pageWidth: width * PX_TO_MM,
           pageHeight: height * PX_TO_MM,
-          fontAssets,
-          useFontEditorCore: exportOptions.pdfUseFontEditorCore,
+          fontAssets: pdfFontAssets,
+          // We normalize assets to TTF up-front so writer-level conversion is not required.
+          useFontEditorCore: false,
         });
         const doc = await renderIR(ir, w);
         await doc.finalize();
@@ -409,4 +418,227 @@ function shouldCollectFontAssets(format, exportOptions) {
 
 function normalizeFontAssets(fontAssets) {
   return normalizeTransferredFontAssets(fontAssets);
+}
+
+async function preparePdfFontAssets(fontAssets, allowConversion) {
+  if (!fontAssets || !Array.isArray(fontAssets.faces) || fontAssets.faces.length === 0) {
+    return undefined;
+  }
+
+  const faces = [];
+
+  for (const face of fontAssets.faces) {
+    const convertedSource = await pickPdfFontSource(face, allowConversion);
+    if (!convertedSource) continue;
+
+    faces.push({
+      ...face,
+      sources: [convertedSource],
+    });
+  }
+
+  return faces.length > 0 ? { faces } : undefined;
+}
+
+async function pickPdfFontSource(face, allowConversion) {
+  const candidates = rankPdfFontSources(face?.sources);
+
+  for (const source of candidates) {
+    const data = toUint8Array(source?.data);
+    const format = resolveFontSourceFormat(source?.format, data);
+    if (!format || !data) continue;
+
+    if (format === 'ttf') {
+      return {
+        ...source,
+        format: 'ttf',
+        mimeType: 'font/ttf',
+        data,
+      };
+    }
+
+    if (!allowConversion || !PDF_CONVERTIBLE_FONT_SOURCE_FORMATS.has(format)) {
+      continue;
+    }
+
+    try {
+      const convertedData = await convertFontSourceToTtf(data, format);
+      if (!convertedData) continue;
+
+      return {
+        ...source,
+        format: 'ttf',
+        mimeType: 'font/ttf',
+        data: convertedData,
+      };
+    } catch (error) {
+      console.warn(
+        `[Web2Vector] Failed to convert font source to TTF for PDF (${face?.family || 'unknown family'}, ${format}):`,
+        error
+      );
+    }
+  }
+
+  return null;
+}
+
+function rankPdfFontSources(sources) {
+  if (!Array.isArray(sources) || sources.length === 0) return [];
+
+  return [...sources]
+    .map((source) => ({
+      source,
+      format: normalizeFontSourceFormat(source?.format),
+    }))
+    .filter((entry) => Boolean(entry.format))
+    .sort((left, right) => {
+      const leftRank = getPdfFontSourcePriority(left.format);
+      const rightRank = getPdfFontSourcePriority(right.format);
+
+      return leftRank - rightRank;
+    })
+    .map((entry) => entry.source);
+}
+
+function getPdfFontSourcePriority(format) {
+  const rank = PDF_FONT_SOURCE_PRIORITY.indexOf(format);
+  return rank === -1 ? Number.MAX_SAFE_INTEGER : rank;
+}
+
+function normalizeFontSourceFormat(format) {
+  if (typeof format !== 'string') return null;
+  return format.trim().toLowerCase();
+}
+
+function resolveFontSourceFormat(declaredFormat, data) {
+  const detectedFormat = detectFontBinaryFormat(data);
+  if (detectedFormat) {
+    return detectedFormat;
+  }
+
+  return normalizeFontSourceFormat(declaredFormat);
+}
+
+function detectFontBinaryFormat(data) {
+  if (!(data instanceof Uint8Array) || data.length < 4) return null;
+
+  const signature = String.fromCharCode(data[0], data[1], data[2], data[3]);
+  if (signature === 'wOFF') return 'woff';
+  if (signature === 'wOF2') return 'woff2';
+  if (signature === 'OTTO') return 'otf';
+  if (signature === 'true') return 'ttf';
+  if (data[0] === 0x00 && data[1] === 0x01 && data[2] === 0x00 && data[3] === 0x00) return 'ttf';
+
+  return null;
+}
+
+function toUint8Array(value) {
+  if (value instanceof Uint8Array) {
+    return value;
+  }
+
+  if (ArrayBuffer.isView(value)) {
+    return new Uint8Array(value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength));
+  }
+
+  if (value instanceof ArrayBuffer) {
+    return new Uint8Array(value.slice(0));
+  }
+
+  if (Array.isArray(value)) {
+    return Uint8Array.from(value);
+  }
+
+  return null;
+}
+
+function toArrayBufferCopy(value) {
+  const data = toUint8Array(value);
+  if (!data) return null;
+
+  return data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
+}
+
+async function convertFontSourceToTtf(data, format) {
+  const normalizedFormat = normalizeFontSourceFormat(format);
+  if (normalizedFormat === 'ttf') {
+    return data;
+  }
+
+  if (!PDF_CONVERTIBLE_FONT_SOURCE_FORMATS.has(normalizedFormat)) {
+    return null;
+  }
+
+  const fontEditorCore = await getFontEditorCore();
+  if (!fontEditorCore?.createFont) {
+    return null;
+  }
+
+  if (normalizedFormat === 'woff2') {
+    await ensureWoff2Runtime(fontEditorCore);
+  }
+
+  const fontBuffer = toArrayBufferCopy(data);
+  if (!fontBuffer) {
+    return null;
+  }
+
+  const readOptions = {
+    type: normalizedFormat,
+  };
+
+  if (normalizedFormat === 'woff') {
+    readOptions.inflate = (compressedData) => pako.inflate(compressedData);
+  }
+
+  const font = fontEditorCore.createFont(fontBuffer, readOptions);
+  const ttfBuffer = font.write({
+    type: 'ttf',
+    toBuffer: false,
+  });
+
+  return toUint8Array(ttfBuffer);
+}
+
+async function getFontEditorCore() {
+  if (!fontEditorCorePromise) {
+    fontEditorCorePromise = import('../../node_modules/fonteditor-core/lib/main.js')
+      .then((mod) => mod?.default ?? mod)
+      .catch((error) => {
+        fontEditorCorePromise = null;
+        throw error;
+      });
+  }
+
+  return fontEditorCorePromise;
+}
+
+async function ensureWoff2Runtime(fontEditorCore) {
+  if (fontEditorCore?.woff2?.isInited?.()) {
+    return;
+  }
+
+  if (!fontEditorCore?.woff2?.init) {
+    throw new Error('fonteditor-core WOFF2 runtime is unavailable');
+  }
+
+  if (!woff2InitPromise) {
+    const wasmUrl = resolveWoff2WasmUrl();
+    if (!wasmUrl) {
+      throw new Error('Unable to resolve WOFF2 wasm URL');
+    }
+
+    woff2InitPromise = fontEditorCore.woff2.init(wasmUrl).catch((error) => {
+      woff2InitPromise = null;
+      throw error;
+    });
+  }
+
+  await woff2InitPromise;
+}
+
+function resolveWoff2WasmUrl() {
+  return typeof extensionApi?.runtime?.getURL === 'function'
+    ? extensionApi.runtime.getURL('woff2.wasm')
+    : null;
 }

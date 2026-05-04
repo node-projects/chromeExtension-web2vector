@@ -63,6 +63,7 @@ const statics = [
   ['manifest.json', 'manifest.json'],
   ['src/popup/popup.html', 'popup.html'],
   ['src/popup/popup.css', 'popup.css'],
+  ['node_modules/fonteditor-core/woff2/woff2.wasm', 'woff2.wasm'],
 ];
 
 for (const [src, dest] of statics) {
