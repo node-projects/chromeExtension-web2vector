@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Web2Vector",
-  "description": "Export any web page to vector formats (SVG, DXF, DWG, PDF) or raster formats (PNG, JPEG, WebP)",
-  "version": "1.4.0",
+  "description": "Export the current web page as a vector or image file, such as SVG, PDF, PNG or WebP. DXF and DWG export is also supported.",
+  "version": "1.5.0",
   "icons": {
     "16": "icons/icon16.png",
     "32": "icons/icon32.png",
