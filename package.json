@@ -17,7 +17,7 @@
   },
   "dependencies": {
     "@chenglou/pretext": "^0.0.6",
-    "@node-projects/layout2vector": "^5.25.0",
+    "@node-projects/layout2vector": "^5.27.0",
     "fonteditor-core": "^2.6.3",
     "get-box-quads-polyfill": "^4.40.0",
     "pako": "^2.1.0"
